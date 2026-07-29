@@ -5,7 +5,6 @@ checkAvailability: true
 
 allowedActions:
   - transfer
-  - divert
   - drop
 
 mcpTools:
