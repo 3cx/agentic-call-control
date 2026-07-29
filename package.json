@@ -1,0 +1,20 @@
+{
+  "name": "agentic-call-control",
+  "version": "1.0.0",
+  "license": "MIT",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces foreach -A run build",
+    "lint": "yarn workspaces foreach -A run lint",
+    "start:openai": "yarn workspace @3cx-examples/openai-realtime start",
+    "start:alibaba-qwen": "yarn workspace @3cx-examples/alibaba-qwen-realtime start",
+    "start:xai": "yarn workspace @3cx-examples/xai-realtime start",
+    "start:gemini": "yarn workspace @3cx-examples/gemini-realtime start",
+    "start": "echo '' && echo 'Please specify an example to start:' && echo '' && echo '  yarn start:openai            # OpenAI Realtime API' && echo '  yarn start:alibaba-qwen      # Alibaba Qwen Omni Realtime' && echo '  yarn start:xai               # xAI Grok Voice Agent' && echo '  yarn start:gemini            # Gemini Live API' && echo '' && exit 1"
+  },
+  "packageManager": "yarn@4.16.0"
+}

@@ -1,0 +1,11 @@
+config.yaml
+config.qwen.yaml
+node_modules
+dist
+/.yarn/install-state.gz
+/.idea
+/.claude/settings.local.json
+.vscode
+.cursor
+/stt-input
+openspec

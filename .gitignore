@@ -1,0 +1,17 @@
+config.yaml
+**/config.yaml
+node_modules
+dist
+examples/**/stt-input
+examples/**/.venv-stt
+/.yarn/install-state.gz
+/.idea
+/.claude/settings.local.json
+.vscode
+.cursor
+/stt-input
+openspec
+*.log
+logs/
+.DS_Store
+**/.DS_Store

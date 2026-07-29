@@ -1,0 +1,45 @@
+appId: your-3cx-app-id
+appSecret: your-3cx-app-secret
+pbxBase: https://your-pbx.3cx.eu:5001
+
+# xAI Grok Voice Agent API key — get from https://console.x.ai
+xaiApiKey: xai-your-api-key
+
+# xAI realtime model (default: grok-voice-latest)
+# xaiModel: grok-voice-latest
+
+# xAI voice (default: tara). Options: tara, nova, sage, ember, etc.
+# xaiVoice: tara
+
+# Server-side VAD silence duration in ms (default: 500)
+# xaiVadSilenceDurationMs: 500
+
+# --- Agent Profile (recommended) ---
+# Load agent behavior from agents/<name>.yaml
+agentProfile: receptionist
+companyName: Your Company
+agentName: Assistant
+initialGreeting: Thank you for calling. How can I help you today?
+
+# --- Legacy mode (fallback if agentProfile is not set) ---
+# agentInstructions: |
+#   You are a professional call center agent...
+
+speakOnRouteFailure: true
+routeFailureUserReply: I am having trouble completing that transfer. Please hold or call back in a moment.
+
+customMcpServers:
+   # Remote MCP server (bearer auth)
+   - name: GoogleCalendar
+     url: https://mcp.example.com/your-server
+     auth:
+       type: bearer
+       token: your-mcp-bearer-token
+     enabled: true
+
+   # Local MCP server (no auth)
+   - name: LocalTools
+     url: http://localhost:3001/mcp
+     auth:
+       type: none
+     enabled: true

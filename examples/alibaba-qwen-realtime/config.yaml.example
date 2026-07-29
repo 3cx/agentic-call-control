@@ -1,0 +1,39 @@
+# === 3CX PBX ===
+appId: your-3cx-app-id
+appSecret: your-3cx-app-secret
+pbxBase: https://your-pbx.3cx.eu:5001
+
+# === Alibaba Cloud DashScope (Qwen Omni Realtime) ===
+dashscopeApiKey: sk-your-dashscope-api-key
+dashscopeBaseUrl: https://dashscope-intl.aliyuncs.com  # Singapore (international) — API keys are region-locked; use https://dashscope.aliyuncs.com for mainland China keys
+
+realtimeModel: qwen3.5-omni-plus-realtime    # Recommended — reliable tool calling and clean audio
+# realtimeModel: qwen3.5-omni-flash-realtime # Cheaper; may vocalize tool calls on first attempt
+realtimeVoice: Tina                          # Fallback; profile voice takes priority
+# realtimeVadSilenceDurationMs: 500
+
+# === Agent profile ===
+agentProfile: receptionist_en
+companyName: "Your Company"
+agentName: "Assistant"
+
+initialGreeting: Thank you for calling. How can I help you today?
+
+speakOnRouteFailure: true
+routeFailureUserReply: I am having trouble completing that transfer. Please hold or call back in a moment.
+
+customMcpServers:
+   # Remote MCP server (bearer auth)
+   - name: GoogleCalendar
+     url: https://mcp.example.com/your-server
+     auth:
+       type: bearer
+       token: your-mcp-bearer-token
+     enabled: true
+
+   # Local MCP server (no auth)
+   - name: LocalTools
+     url: http://localhost:3001/mcp
+     auth:
+       type: none
+     enabled: true

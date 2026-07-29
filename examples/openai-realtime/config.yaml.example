@@ -1,0 +1,53 @@
+appId: your-3cx-app-id
+appSecret: your-3cx-app-secret
+pbxBase: https://your-pbx.3cx.eu:5001
+
+# OpenAI API key — https://platform.openai.com/api-keys
+openaiApiKey: sk-your-openai-api-key
+
+# OpenAI Realtime model
+openaiModel: gpt-realtime-2 # Reasoning model with tool use (current default in the code)
+# openaiModel: gpt-realtime-2.1 # Latest — reasoning model with tool use
+# openaiModel: gpt-realtime-2.1-mini # Reasoning model with tool use, cost-efficient
+
+# OpenAI voice (default: alloy). Realtime API voices: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar
+openaiVoice: alloy
+
+# Server-side VAD silence duration in ms (default: 500)
+openaiVadSilenceDurationMs: 500
+
+# Server-side VAD speech threshold, 0-1 (default: 0.5). Raise if the agent's
+# own speech is getting falsely interrupted by background noise/echo.
+openaiVadThreshold: 0.6
+
+# Caller speech transcription for [User] logs (default: gpt-4o-transcribe).
+# gpt-4o-transcribe — best accuracy; gpt-4o-mini-transcribe — cheaper/faster.
+# Set to "none" to disable caller transcript logging.
+openaiInputTranscriptionModel: gpt-4o-transcribe
+openaiInputTranscriptionLanguage: en
+
+# --- Agent Profile (recommended) ---
+agentProfile: receptionist
+companyName: Your Company
+agentName: Assistant
+
+initialGreeting: Thank you for calling. How can I help you today?
+
+speakOnRouteFailure: true
+routeFailureUserReply: I am having trouble completing that transfer. Please hold or call back in a moment.
+
+customMcpServers:
+   # Remote MCP server (bearer auth)
+   - name: GoogleCalendar
+     url: https://mcp.example.com/your-server
+     auth:
+       type: bearer
+       token: your-mcp-bearer-token
+     enabled: true
+
+   # Local MCP server (no auth)
+   - name: LocalTools
+     url: http://localhost:3001/mcp
+     auth:
+       type: none
+     enabled: true

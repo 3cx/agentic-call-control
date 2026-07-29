@@ -1,0 +1,50 @@
+appId: your-3cx-app-id
+appSecret: your-3cx-app-secret
+pbxBase: https://your-pbx.3cx.eu:5001
+
+# Google Gemini API key — get from https://aistudio.google.com/apikey
+geminiApiKey: your-gemini-api-key
+
+# Gemini voice (default: Kore). Options: Kore, Charon, Fenrir, Aoede, Puck, etc.
+geminiVoice: Kore
+
+# Gemini model (default: models/gemini-3.1-flash-live-preview)
+geminiModel: models/gemini-3.1-flash-live-preview
+
+# Server-side VAD silence duration in ms (default: 500)
+geminiSilenceDurationMs: 500
+
+# --- Agent Profile (recommended) ---
+# Load agent behavior from agents/<name>.yaml
+# The profile defines role, allowed actions, MCP tools, policies, and screening config.
+# The prompt template lives in agents/templates/<name>.mustache (Mustache syntax).
+# Available template variables: {{company_name}}, {{agent_name}}, {{caller_name}}, {{caller_number}}
+# Conditional blocks: {{#call_screening}}, {{#check_availability}}, {{#has_policies}}
+agentProfile: receptionist
+companyName: Your Company
+agentName: Assistant
+
+# --- Legacy mode (fallback if agentProfile is not set) ---
+# agentInstructions: |
+#   You are a professional call center agent...
+
+initialGreeting: Thank you for calling. How can I help you today?
+
+speakOnRouteFailure: true
+routeFailureUserReply: I am having trouble completing that transfer. Please hold or call back in a moment.
+
+customMcpServers:
+   # Remote MCP server (bearer auth)
+   - name: GoogleCalendar
+     url: https://mcp.example.com/your-server
+     auth:
+       type: bearer
+       token: your-mcp-bearer-token
+     enabled: true
+
+   # Local MCP server (no auth)
+   - name: LocalTools
+     url: http://localhost:3001/mcp
+     auth:
+       type: none
+     enabled: true
