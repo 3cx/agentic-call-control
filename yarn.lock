@@ -11,7 +11,7 @@ __metadata:
   dependencies:
     "@3cx-examples/logger": "workspace:*"
     "@3cx-examples/mcp": "workspace:*"
-    "@3cx/call-control-sdk": "npm:^0.1.7"
+    "@3cx/call-control-sdk": "npm:^0.1.8"
     "@eslint/js": "npm:^9.39.4"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@types/debug": "npm:^4.1.13"
@@ -37,7 +37,7 @@ __metadata:
   dependencies:
     "@3cx-examples/logger": "workspace:*"
     "@3cx-examples/mcp": "workspace:*"
-    "@3cx/call-control-sdk": "npm:^0.1.7"
+    "@3cx/call-control-sdk": "npm:^0.1.8"
     "@eslint/js": "npm:^9.39.4"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@types/debug": "npm:^4.1.13"
@@ -73,7 +73,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@3cx-examples/mcp@workspace:packages/mcp"
   dependencies:
-    "@3cx/call-control-sdk": "npm:^0.1.7"
+    "@3cx/call-control-sdk": "npm:^0.1.8"
     "@eslint/js": "npm:^9.39.4"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@types/node": "npm:^24.0.0"
@@ -90,7 +90,7 @@ __metadata:
   dependencies:
     "@3cx-examples/logger": "workspace:*"
     "@3cx-examples/mcp": "workspace:*"
-    "@3cx/call-control-sdk": "npm:^0.1.7"
+    "@3cx/call-control-sdk": "npm:^0.1.8"
     "@eslint/js": "npm:^9.39.4"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@types/debug": "npm:^4.1.13"
@@ -115,7 +115,7 @@ __metadata:
   dependencies:
     "@3cx-examples/logger": "workspace:*"
     "@3cx-examples/mcp": "workspace:*"
-    "@3cx/call-control-sdk": "npm:^0.1.7"
+    "@3cx/call-control-sdk": "npm:^0.1.8"
     "@eslint/js": "npm:^9.39.4"
     "@modelcontextprotocol/sdk": "npm:^1.29.0"
     "@types/debug": "npm:^4.1.13"
@@ -134,9 +134,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@3cx/call-control-sdk@npm:^0.1.7":
-  version: 0.1.7
-  resolution: "@3cx/call-control-sdk@npm:0.1.7"
+"@3cx/call-control-sdk@npm:^0.1.8":
+  version: 0.1.8
+  resolution: "@3cx/call-control-sdk@npm:0.1.8"
   dependencies:
     axios: "npm:^1.18.1"
     ws: "npm:^8.21.1"
@@ -145,7 +145,7 @@ __metadata:
   peerDependenciesMeta:
     "@types/node":
       optional: true
-  checksum: 10/d906c1f064cd7955566ad649e0ba42f36dbd3d6316aab3015ef95210c76c3fb7dd12f9ffba81ce5b79f4fd27d2ae547f7301ade81569cbce0e526d72878c334e
+  checksum: 10/d0cdc6b01fed4aad636ffcde6edbe0749e7974b2f8e875302199f61d7a27565d5168da51c3909706a2f1ceaa099874dd4c7dcc09ac2b8b983c4ff99bec06c293
   languageName: node
   linkType: hard
 
