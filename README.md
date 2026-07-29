@@ -1,12 +1,30 @@
 # Agentic Call Control — Examples
 
-This repository shows how to connect **external AI voice agent applications** to **3CX PBX** using the [CallControl API](https://www.3cx.com/docs/call-control-api-endpoints/) and the CallControl SDK. The agents run entirely outside 3CX — on your own infrastructure, using your own AI provider — and interact with the PBX purely through its API: joining calls, streaming audio in/out, and controlling routing (transfer, voicemail, drop) through tool calls. No 3CX source code or modifications required.
+This repository shows how to connect **external AI voice agent applications** to **3CX PBX** using the [CallControl API](https://www.3cx.com/docs/call-control-api-endpoints/) and the [CallControl SDK](https://github.com/3cx/call-control-sdk-ts). The agents run entirely outside 3CX — on your own infrastructure, using your own AI provider — and interact with the PBX purely through its API: joining calls, streaming audio in/out, and controlling routing (transfer, voicemail, drop) through tool calls. No 3CX source code or modifications required.
 
 All examples use a **single realtime audio stream** (OpenAI Realtime, Gemini Live, xAI Grok, Alibaba Qwen) — STT, reasoning, and TTS happen inside one continuous bidirectional audio stream with no handoff between stages.
 
 All examples support the **3CX MCP server** for phonebook lookups and contact management.
 
-Optional **extra MCP servers** (calendars, CRMs, etc.) can be added via `customMcpServers` in each example’s `config.yaml`. Tools from those servers are merged with 3CX MCP. Only tools listed in the agent profile `mcpTools` are exposed to the model — add each tool by its exact name (e.g. `googlecalendar.quick_add`) in `agents/<profile>.yaml`:
+Optional **extra MCP servers** (calendars, CRMs, etc.) can be added via `customMcpServers` in each example’s `config.yaml`. Each server supports token-based authentication — `bearer` (with a token) or `none` for unauthenticated servers:
+
+```yaml
+customMcpServers:
+  - name: GoogleCalendar
+    url: https://mcp.example.com/your-server
+    auth:
+      type: bearer
+      token: your-mcp-bearer-token
+    enabled: true
+
+  - name: LocalTools
+    url: http://localhost:3001/mcp
+    auth:
+      type: none
+    enabled: true
+```
+
+Tools from those servers are merged with 3CX MCP. Only tools listed in the agent profile `mcpTools` are exposed to the model — add each tool by its exact name (e.g. `googlecalendar.quick_add`) in `agents/<profile>.yaml`:
 
 ```yaml
 mcpTools:
