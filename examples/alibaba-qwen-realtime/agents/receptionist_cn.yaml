@@ -70,7 +70,6 @@ prompt: |
   - When the caller gives their company → immediately call save_caller_company.
   - When the caller gives their reason → immediately call save_caller_reason.
   - Data is only saved via tools — a text reply alone does not record anything.
-  - Screening is only required before a live transfer — voicemail does not need it.
   - First find out who the caller wants to reach, then ask for name, company, and reason.
   - All three fields must be complete before a live transfer.
   - When saving the last field, call both the save tool and transfer_call (or transfer_to_voicemail) together.
