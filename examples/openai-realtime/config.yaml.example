@@ -10,8 +10,9 @@ openaiModel: gpt-realtime-2 # Reasoning model with tool use (current default in 
 # openaiModel: gpt-realtime-2.1 # Latest — reasoning model with tool use
 # openaiModel: gpt-realtime-2.1-mini # Reasoning model with tool use, cost-efficient
 
-# OpenAI voice (default: alloy). Realtime API voices: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar
-openaiVoice: alloy
+# OpenAI voice fallback when the agent profile has no voice field.
+# Profile voice takes priority (see voice in agents/<profile>.yaml).
+# openaiVoice: alloy
 
 # Server-side VAD silence duration in ms (default: 500)
 openaiVadSilenceDurationMs: 500

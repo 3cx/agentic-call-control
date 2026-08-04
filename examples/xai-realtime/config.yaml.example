@@ -8,7 +8,8 @@ xaiApiKey: xai-your-api-key
 # xAI realtime model (default: grok-voice-latest)
 # xaiModel: grok-voice-latest
 
-# xAI voice (default: tara). Options: tara, nova, sage, ember, etc.
+# xAI voice fallback when the agent profile has no voice field.
+# Profile voice takes priority (see voice in agents/<profile>.yaml).
 # xaiVoice: tara
 
 # Server-side VAD silence duration in ms (default: 500)

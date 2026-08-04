@@ -4,7 +4,7 @@ export interface AppConfig {
     pbxBase: string;
 
     geminiApiKey: string;
-    geminiVoice?: string;
+    geminiVoice?: string; // Fallback when agent profile has no voice
     geminiModel?: string;
     geminiSilenceDurationMs?: number;
 

@@ -12,7 +12,7 @@
   "dependencies": {
     "@3cx-examples/logger": "workspace:*",
     "@3cx-examples/mcp": "workspace:*",
-    "@3cx/call-control-sdk": "^0.1.8",
+    "@3cx/call-control-sdk": "^0.1.10",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "js-yaml": "^4.1.1",
     "mustache": "^4.2.0",

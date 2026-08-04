@@ -110,7 +110,7 @@ export function createCallStore(
             participant,
             {
                 geminiApiKey: appConfig.geminiApiKey,
-                voice: appConfig.geminiVoice ?? 'Kore',
+                voice: profile?.voice ?? appConfig.geminiVoice ?? 'Kore',
                 instructions,
                 model: appConfig.geminiModel,
                 silenceDurationMs: appConfig.geminiSilenceDurationMs,

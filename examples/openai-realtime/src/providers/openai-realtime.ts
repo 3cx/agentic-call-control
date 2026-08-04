@@ -25,6 +25,7 @@ export interface OpenAiToolDef {
 
 export interface OpenAiBridgeConfig {
     appConfig: AppConfig;
+    voice?: string;
     instructions: string;
     localTools: OpenAiToolDef[];
     greeting: string;
@@ -45,7 +46,7 @@ export function createOpenAiRealtimeBridge(
     const log = config.logger ?? createNoopLogger();
     const appConfig = config.appConfig;
     const model = appConfig.openaiModel ?? 'gpt-realtime-2';
-    const voice = appConfig.openaiVoice ?? 'alloy';
+    const voice = config.voice ?? appConfig.openaiVoice ?? 'alloy';
     const pcmFormat = { type: 'audio/pcm', rate: 24000 };
 
     const turnDetection: Record<string, unknown> = { type: 'server_vad' };

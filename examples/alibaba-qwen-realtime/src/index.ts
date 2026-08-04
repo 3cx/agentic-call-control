@@ -12,7 +12,6 @@ async function main() {
     console.log(chalk.cyan(`   3CX PBX: ${appconfig.pbxBase}`));
     console.log(chalk.cyan(`   DashScope: ${appconfig.dashscopeBaseUrl}`));
     console.log(chalk.cyan(`   Model: ${appconfig.realtimeModel ?? 'qwen3.5-omni-plus-realtime'}`));
-    console.log(chalk.cyan(`   Voice: ${appconfig.realtimeVoice ?? 'from agent profile'}`));
 
     let profile: AgentProfile | null = null;
 
@@ -25,6 +24,8 @@ async function main() {
         console.error(chalk.red('Error: neither agentProfile nor agentInstructions is set in config.yaml'));
         process.exit(1);
     }
+
+    console.log(chalk.cyan(`   Voice: ${profile?.voice ?? appconfig.realtimeVoice ?? 'Ethan'}`));
 
     const client = new CallControlClient({
         pbxBase: appconfig.pbxBase,

@@ -29,7 +29,7 @@ Per-example (from `examples/<name>/`): `yarn start`, `yarn build`, `yarn lint`.
 | `@3cx-examples/logger`  | Call logging helpers                                                |
 | `@3cx-examples/mcp`     | 3CX MCP client, optional multi-server custom MCP router, McpManager |
 
-`@3cx/call-control-sdk` is installed from public npm (`^0.1.8`), not vendored in this repo.
+`@3cx/call-control-sdk` is installed from public npm (`^0.1.10`), not vendored in this repo.
 
 ## Examples
 
