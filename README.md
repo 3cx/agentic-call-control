@@ -49,6 +49,7 @@ yarn install
    - [Alibaba Qwen realtime](./examples/alibaba-qwen-realtime/README.md) — DashScope Qwen Omni Realtime
    - [xAI Grok realtime](./examples/xai-realtime/README.md) — xAI Grok Voice Agent
    - [Gemini Live realtime](./examples/gemini-realtime/README.md) — Gemini Live API
+   - [Web Dialer](./examples/web-dialer/README.md) — browser microphone and speaker calling without SIP registration
 
 3. When ready, start from the repo root:
 
@@ -57,6 +58,7 @@ yarn start:openai            # OpenAI Realtime API
 yarn start:alibaba-qwen      # Alibaba Qwen Omni Realtime
 yarn start:xai               # xAI Grok Voice Agent
 yarn start:gemini            # Gemini Live realtime
+yarn start:web-dialer        # Browser dialer (no SIP registration)
 ```
 
 ## License
