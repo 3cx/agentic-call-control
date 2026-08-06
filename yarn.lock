@@ -109,6 +109,19 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@3cx-examples/web-dialer@workspace:examples/web-dialer":
+  version: 0.0.0-use.local
+  resolution: "@3cx-examples/web-dialer@workspace:examples/web-dialer"
+  dependencies:
+    "@3cx/call-control-sdk": "npm:^0.1.10"
+    "@types/node": "npm:^24.0.0"
+    "@types/ws": "npm:^8.18.1"
+    tsx: "npm:^4.21.0"
+    typescript: "npm:^5.9.3"
+    ws: "npm:^8.20.0"
+  languageName: unknown
+  linkType: soft
+
 "@3cx-examples/xai-realtime@workspace:examples/xai-realtime":
   version: 0.0.0-use.local
   resolution: "@3cx-examples/xai-realtime@workspace:examples/xai-realtime"

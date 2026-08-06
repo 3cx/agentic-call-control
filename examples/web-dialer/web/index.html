@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="基于 3CX Call Control API 的免 SIP 注册网页拨号盘示例" />
+    <title>3CX Web Dialer</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="brand-mark" aria-hidden="true">3</div>
+        <div>
+          <p class="eyebrow">CALL CONTROL LAB</p>
+          <h1>Web Dialer</h1>
+        </div>
+        <span id="connectionBadge" class="badge offline"><i></i>未连接</span>
+      </header>
+
+      <section id="setupPanel" class="card setup-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">PRIVATE SESSION</p>
+            <h2>连接你的 3CX</h2>
+          </div>
+          <span class="lock">凭据仅保存在本机服务内存</span>
+        </div>
+        <form id="connectForm">
+          <label>3CX 域名<input id="pbxBase" type="url" required placeholder="https://company.3cx.com" autocomplete="url" /></label>
+          <div class="field-row">
+            <label>Client ID<input id="appId" required placeholder="webdialer" autocomplete="username" /></label>
+            <label>Key<input id="appSecret" type="password" required placeholder="••••••••••••" autocomplete="current-password" /></label>
+          </div>
+          <button id="connectButton" class="primary wide" type="submit">连接并启用音频</button>
+        </form>
+      </section>
+
+      <section id="phonePanel" class="phone-grid hidden">
+        <article class="card dialer-card">
+          <div class="call-display">
+            <p id="callLabel" class="eyebrow">READY TO CALL</p>
+            <input id="numberInput" aria-label="电话号码" inputmode="tel" placeholder="输入号码" autocomplete="off" />
+            <p id="callTimer" class="call-timer">等待拨号</p>
+          </div>
+
+          <div id="keypad" class="keypad" aria-label="拨号盘">
+            <button data-key="1"><b>1</b><span>&nbsp;</span></button>
+            <button data-key="2"><b>2</b><span>ABC</span></button>
+            <button data-key="3"><b>3</b><span>DEF</span></button>
+            <button data-key="4"><b>4</b><span>GHI</span></button>
+            <button data-key="5"><b>5</b><span>JKL</span></button>
+            <button data-key="6"><b>6</b><span>MNO</span></button>
+            <button data-key="7"><b>7</b><span>PQRS</span></button>
+            <button data-key="8"><b>8</b><span>TUV</span></button>
+            <button data-key="9"><b>9</b><span>WXYZ</span></button>
+            <button data-key="*"><b>*</b><span>&nbsp;</span></button>
+            <button data-key="0"><b>0</b><span>+</span></button>
+            <button data-key="#"><b>#</b><span>&nbsp;</span></button>
+          </div>
+
+          <div class="call-actions">
+            <button id="backspaceButton" class="round secondary" aria-label="删除一位">⌫</button>
+            <button id="callButton" class="round call" aria-label="拨号">☎</button>
+            <button id="muteButton" class="round secondary" aria-label="静音">♩</button>
+          </div>
+          <button id="hangupButton" class="hangup hidden" type="button">结束通话</button>
+        </article>
+
+        <aside class="card history-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">RECENTS</p>
+              <h2>通话记录</h2>
+            </div>
+            <button id="clearHistoryButton" class="text-button">清空</button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </aside>
+      </section>
+
+      <p id="toast" class="toast hidden" role="status"></p>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

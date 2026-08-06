@@ -1,0 +1,23 @@
+{
+  "name": "@3cx-examples/web-dialer",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json",
+    "start": "yarn build && tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@3cx/call-control-sdk": "^0.1.10",
+    "tsx": "^4.21.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  }
+}
