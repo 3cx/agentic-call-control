@@ -60,10 +60,14 @@
             <button data-key="#"><b>#</b><span>&nbsp;</span></button>
           </div>
 
-          <div class="call-actions">
+          <div id="callActions" class="call-actions">
             <button id="backspaceButton" class="round secondary" aria-label="删除一位">⌫</button>
             <button id="callButton" class="round call" aria-label="拨号">☎</button>
             <button id="muteButton" class="round secondary" aria-label="静音">♩</button>
+          </div>
+          <div id="incomingActions" class="incoming-actions hidden">
+            <button id="rejectButton" class="round reject" type="button" aria-label="拒接">✕</button>
+            <button id="acceptButton" class="round accept" type="button" aria-label="接听">☎</button>
           </div>
           <button id="hangupButton" class="hangup hidden" type="button">结束通话</button>
         </article>

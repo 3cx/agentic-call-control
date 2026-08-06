@@ -50,6 +50,10 @@ input:focus { border-color: #6ef0ae8f; box-shadow: 0 0 0 3px #6ef0ae16; }
 .round.secondary { background: #ffffff0d; color: #b7c6bf; }
 .round.call { width: 64px; height: 64px; background: #55e99c; color: #062116; font-size: 25px; box-shadow: 0 12px 35px #55e99c42; }
 .round.active { background: #ffd383; color: #352100; }
+.incoming-actions { display: flex; justify-content: center; gap: 72px; margin-top: 12px; }
+.round.accept, .round.reject { width: 66px; height: 66px; font-size: 24px; }
+.round.accept { background: #55e99c; color: #062116; box-shadow: 0 12px 35px #55e99c42; }
+.round.reject { background: #ff6575; color: white; box-shadow: 0 12px 35px #ff657530; }
 .hangup { width: 100%; margin-top: 20px; padding: 14px; border: 0; border-radius: 14px; background: #ff65751c; color: #ff8793; cursor: pointer; font-weight: 750; }
 .text-button { border: 0; background: none; color: #74cfa2; cursor: pointer; font-size: 12px; }
 .history-list { display: grid; gap: 4px; }

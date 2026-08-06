@@ -1,6 +1,6 @@
 interface ServerMessage {
     type: 'pbx-state' | 'call-state' | 'error';
-    state?: 'connected' | 'disconnected' | 'dialing' | 'connected' | 'ended' | 'idle';
+    state?: 'connected' | 'disconnected' | 'dialing' | 'ringing' | 'ended' | 'idle';
     message?: string;
     party?: string;
     direction?: 'incoming' | 'outgoing';
@@ -22,10 +22,15 @@ const connectionBadge = $('#connectionBadge');
 const connectForm = $('#connectForm') as HTMLFormElement;
 const connectButton = $('#connectButton') as HTMLButtonElement;
 const numberInput = $('#numberInput') as HTMLInputElement;
+const keypad = $('#keypad');
 const callButton = $('#callButton') as HTMLButtonElement;
+const callActions = $('#callActions');
 const hangupButton = $('#hangupButton') as HTMLButtonElement;
 const backspaceButton = $('#backspaceButton') as HTMLButtonElement;
 const muteButton = $('#muteButton') as HTMLButtonElement;
+const incomingActions = $('#incomingActions');
+const acceptButton = $('#acceptButton') as HTMLButtonElement;
+const rejectButton = $('#rejectButton') as HTMLButtonElement;
 const callLabel = $('#callLabel');
 const callTimer = $('#callTimer');
 const historyList = $('#historyList');
@@ -40,7 +45,13 @@ let callActive = false;
 let callStartedAt = 0;
 let timerId: number | null = null;
 let playbackTime = 0;
+let ringtoneTimer: number | null = null;
+const playbackSources = new Set<AudioBufferSourceNode>();
+const ringtoneOscillators = new Set<OscillatorNode>();
 let currentHistory: HistoryEntry | null = null;
+
+const maxSocketBufferedBytes = 64 * 1024;
+const maxPlaybackBacklogSeconds = 0.25;
 
 function showError(message: string): void {
     toast.textContent = message;
@@ -64,7 +75,7 @@ async function prepareAudio(): Promise<void> {
     });
     audioContext = new AudioContext();
     const source = audioContext.createMediaStreamSource(mediaStream);
-    micProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+    micProcessor = audioContext.createScriptProcessor(1024, 1, 1);
     const silentGain = audioContext.createGain();
     silentGain.gain.value = 0;
     source.connect(micProcessor);
@@ -72,7 +83,13 @@ async function prepareAudio(): Promise<void> {
     silentGain.connect(audioContext.destination);
 
     micProcessor.onaudioprocess = (event) => {
-        if (!callActive || muted || socket?.readyState !== WebSocket.OPEN || !audioContext) return;
+        if (
+            !callActive
+            || muted
+            || socket?.readyState !== WebSocket.OPEN
+            || socket.bufferedAmount >= maxSocketBufferedBytes
+            || !audioContext
+        ) return;
         const input = event.inputBuffer.getChannelData(0);
         socket.send(floatToPcm16(downsample(input, audioContext.sampleRate, 8000)));
     };
@@ -114,9 +131,54 @@ function playPcm(data: ArrayBuffer): void {
     source.buffer = buffer;
     source.connect(audioContext.destination);
     const now = audioContext.currentTime;
-    playbackTime = Math.max(playbackTime, now + 0.04);
+    if (playbackTime - now > maxPlaybackBacklogSeconds) stopPlayback();
+    playbackTime = Math.max(playbackTime, now + 0.025);
+    playbackSources.add(source);
+    source.onended = () => playbackSources.delete(source);
     source.start(playbackTime);
     playbackTime += buffer.duration;
+}
+
+function stopPlayback(): void {
+    for (const source of playbackSources) {
+        try { source.stop(); } catch { /* already stopped */ }
+    }
+    playbackSources.clear();
+    playbackTime = 0;
+}
+
+function ringOnce(): void {
+    if (!audioContext) return;
+    const gain = audioContext.createGain();
+    gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, audioContext.currentTime + 0.02);
+    gain.gain.setValueAtTime(0.08, audioContext.currentTime + 0.8);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.95);
+    gain.connect(audioContext.destination);
+    for (const frequency of [440, 480]) {
+        const oscillator = audioContext.createOscillator();
+        oscillator.frequency.value = frequency;
+        oscillator.connect(gain);
+        ringtoneOscillators.add(oscillator);
+        oscillator.onended = () => ringtoneOscillators.delete(oscillator);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 1);
+    }
+}
+
+function startRingtone(): void {
+    stopRingtone();
+    ringOnce();
+    ringtoneTimer = window.setInterval(ringOnce, 3000);
+}
+
+function stopRingtone(): void {
+    if (ringtoneTimer) window.clearInterval(ringtoneTimer);
+    ringtoneTimer = null;
+    for (const oscillator of ringtoneOscillators) {
+        try { oscillator.stop(); } catch { /* already stopped */ }
+    }
+    ringtoneOscillators.clear();
 }
 
 function connectSocket(): Promise<void> {
@@ -130,6 +192,8 @@ function connectSocket(): Promise<void> {
             connectionBadge.className = 'badge offline';
             connectionBadge.innerHTML = '<i></i>已断开';
             callActive = false;
+            stopRingtone();
+            stopPlayback();
         };
         socket.onmessage = (event) => {
             if (event.data instanceof ArrayBuffer) playPcm(event.data);
@@ -155,6 +219,7 @@ function handleServerMessage(message: ServerMessage): void {
     }
     if (message.type !== 'call-state') return;
     if (message.state === 'dialing') beginCall(message.party ?? numberInput.value, 'outgoing', false);
+    else if (message.state === 'ringing') beginIncomingRing(message.party ?? '未知号码');
     else if (message.state === 'connected') beginCall(message.party ?? '未知号码', message.direction ?? 'incoming', true);
     else if (message.state === 'ended' || message.state === 'idle') endCall();
 }
@@ -176,14 +241,40 @@ function beginCall(party: string, direction: 'incoming' | 'outgoing', answered: 
     callTimer.textContent = answered ? '00:00' : '正在呼叫…';
     callButton.classList.add('hidden');
     backspaceButton.classList.add('hidden');
+    keypad.classList.remove('hidden');
+    callActions.classList.remove('hidden');
+    incomingActions.classList.add('hidden');
     hangupButton.classList.remove('hidden');
     callActive = answered;
     if (answered) {
+        stopRingtone();
         callStartedAt = Date.now();
         playbackTime = audioContext?.currentTime ?? 0;
         if (timerId) window.clearInterval(timerId);
         timerId = window.setInterval(updateTimer, 1000);
     }
+}
+
+function beginIncomingRing(party: string): void {
+    currentHistory = {
+        id: crypto.randomUUID(),
+        party,
+        direction: 'incoming',
+        startedAt: Date.now(),
+        answered: false,
+    };
+    numberInput.value = party;
+    numberInput.readOnly = true;
+    callLabel.textContent = 'INCOMING CALL';
+    callTimer.textContent = '来电响铃中…';
+    callButton.classList.add('hidden');
+    backspaceButton.classList.add('hidden');
+    keypad.classList.add('hidden');
+    callActions.classList.add('hidden');
+    hangupButton.classList.add('hidden');
+    incomingActions.classList.remove('hidden');
+    callActive = false;
+    startRingtone();
 }
 
 function updateTimer(): void {
@@ -195,7 +286,8 @@ function endCall(): void {
     if (timerId) window.clearInterval(timerId);
     timerId = null;
     callActive = false;
-    playbackTime = 0;
+    stopRingtone();
+    stopPlayback();
     if (currentHistory) {
         currentHistory.endedAt = Date.now();
         saveHistory(currentHistory);
@@ -205,8 +297,11 @@ function endCall(): void {
     callTimer.textContent = '等待拨号';
     numberInput.value = '';
     numberInput.readOnly = false;
+    keypad.classList.remove('hidden');
+    callActions.classList.remove('hidden');
     callButton.classList.remove('hidden');
     backspaceButton.classList.remove('hidden');
+    incomingActions.classList.add('hidden');
     hangupButton.classList.add('hidden');
 }
 
@@ -274,7 +369,18 @@ callButton.addEventListener('click', async () => {
         send({ type: 'dial', destination });
     } catch (error) { showError(error instanceof Error ? error.message : String(error)); }
 });
-hangupButton.addEventListener('click', () => send({ type: 'hangup' }));
+hangupButton.addEventListener('click', () => {
+    endCall();
+    send({ type: 'hangup' });
+});
+acceptButton.addEventListener('click', () => {
+    stopRingtone();
+    send({ type: 'accept' });
+});
+rejectButton.addEventListener('click', () => {
+    endCall();
+    send({ type: 'hangup' });
+});
 muteButton.addEventListener('click', () => {
     muted = !muted;
     muteButton.classList.toggle('active', muted);

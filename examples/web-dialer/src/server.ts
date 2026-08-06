@@ -4,7 +4,7 @@ import { extname, join, normalize } from 'node:path';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
-import { CallControlClient, type Participant } from '@3cx/call-control-sdk';
+import { CallControlClient, type AudioWriter, type Participant } from '@3cx/call-control-sdk';
 import { WebSocket, WebSocketServer } from 'ws';
 
 interface ConnectMessage {
@@ -23,9 +23,33 @@ interface HangupMessage {
     type: 'hangup';
 }
 
-type ClientMessage = ConnectMessage | DialMessage | HangupMessage;
+interface AcceptMessage {
+    type: 'accept';
+}
+
+type ClientMessage = ConnectMessage | DialMessage | HangupMessage | AcceptMessage;
 
 const port = Number(process.env.PORT ?? 8787);
+const maxBufferedAudioBytes = 320 * 10;
+const maxSocketBufferedBytes = 64 * 1024;
+const incomingRingTimeoutMs = 30_000;
+const ringbackCycleMs = 3_000;
+
+function createRingbackTone(): Buffer {
+    const sampleRate = 8_000;
+    const durationSeconds = 1;
+    const samples = sampleRate * durationSeconds;
+    const pcm = Buffer.alloc(samples * 2);
+    for (let index = 0; index < samples; index++) {
+        const time = index / sampleRate;
+        const fade = Math.min(1, index / 80, (samples - index) / 80);
+        const mixed = (Math.sin(2 * Math.PI * 440 * time) + Math.sin(2 * Math.PI * 480 * time)) * 0.12 * fade;
+        pcm.writeInt16LE(Math.round(mixed * 0x7fff), index * 2);
+    }
+    return pcm;
+}
+
+const ringbackTone = createRingbackTone();
 const webRoot = fileURLToPath(new URL('../web', import.meta.url));
 const builtWebRoot = fileURLToPath(new URL('../dist/web', import.meta.url));
 
@@ -72,6 +96,11 @@ class DialerSession {
     private client: CallControlClient | null = null;
     private activeParticipant: Participant | null = null;
     private audioStream: Readable | null = null;
+    private audioWriter: AudioWriter | null = null;
+    private mediaActive = false;
+    private incomingParty = '';
+    private ringTimer: NodeJS.Timeout | null = null;
+    private ringbackTimer: NodeJS.Timeout | null = null;
     private pendingDestination = '';
     private pendingParticipantId: number | null = null;
     private cancelPendingCall = false;
@@ -97,13 +126,16 @@ class DialerSession {
 
         if (message.type === 'connect') await this.connect(message);
         else if (message.type === 'dial') await this.dial(message.destination);
+        else if (message.type === 'accept') await this.accept();
         else if (message.type === 'hangup') await this.hangup();
         else throw new Error('不支持的操作');
     }
 
     handleAudio(data: Buffer): void {
-        if (!this.activeParticipant || data.length === 0) return;
-        this.activeParticipant.getAudioWriter().write(data);
+        if (!this.activeParticipant || !this.mediaActive || data.length === 0) return;
+        this.audioWriter ??= this.activeParticipant.getAudioWriter();
+        if (this.audioWriter.bufferedBytes > maxBufferedAudioBytes) this.audioWriter.clear();
+        this.audioWriter.write(data);
     }
 
     private async connect(message: ConnectMessage): Promise<void> {
@@ -177,6 +209,36 @@ class DialerSession {
         this.pendingDestination = '';
         this.pendingParticipantId = null;
         this.cancelPendingCall = false;
+        if (direction === 'incoming') {
+            this.incomingParty = party;
+            this.send({
+                type: 'call-state',
+                state: 'ringing',
+                participantId: participant.id,
+                party,
+                direction,
+            });
+            this.startRemoteRingback(participant);
+            this.ringTimer = setTimeout(() => void this.hangup(), incomingRingTimeoutMs);
+            return;
+        }
+
+        await this.startMedia(participant, party, direction);
+    }
+
+    private async accept(): Promise<void> {
+        if (!this.activeParticipant || this.callDirection !== 'incoming' || this.mediaActive) return;
+        this.clearRingTimer();
+        this.stopRemoteRingback();
+        await this.startMedia(this.activeParticipant, this.incomingParty || '未知号码', 'incoming');
+    }
+
+    private async startMedia(
+        participant: Participant,
+        party: string,
+        direction: 'incoming' | 'outgoing',
+    ): Promise<void> {
+        this.mediaActive = true;
         this.send({
             type: 'call-state',
             state: 'connected',
@@ -187,13 +249,19 @@ class DialerSession {
 
         try {
             const stream = await participant.getAudioStream();
-            if (this.activeParticipant?.id !== participant.id) {
+            if (this.activeParticipant?.id !== participant.id || !this.mediaActive) {
                 stream.destroy();
                 return;
             }
             this.audioStream = stream;
             stream.on('data', (chunk: Buffer) => {
-                if (this.socket.readyState === WebSocket.OPEN) this.socket.send(chunk, { binary: true });
+                if (
+                    this.mediaActive
+                    && this.socket.readyState === WebSocket.OPEN
+                    && this.socket.bufferedAmount < maxSocketBufferedBytes
+                ) {
+                    this.socket.send(chunk, { binary: true });
+                }
             });
             stream.on('error', (error) => this.fail(error));
         } catch (error) {
@@ -204,7 +272,10 @@ class DialerSession {
     private onParticipantDisconnected(id: number): void {
         if (this.activeParticipant?.id !== id) return;
         this.stopAudio();
+        this.clearRingTimer();
+        this.stopRemoteRingback();
         this.activeParticipant = null;
+        this.incomingParty = '';
         this.pendingDestination = '';
         this.pendingParticipantId = null;
         this.cancelPendingCall = false;
@@ -213,7 +284,12 @@ class DialerSession {
 
     private async hangup(): Promise<void> {
         if (this.activeParticipant) {
-            await this.activeParticipant.drop();
+            const participant = this.activeParticipant;
+            this.clearRingTimer();
+            this.stopRemoteRingback();
+            this.stopAudio();
+            this.send({ type: 'call-state', state: 'ended', direction: this.callDirection });
+            await participant.drop().catch((error) => this.fail(error));
             return;
         }
         if (this.pendingDestination) {
@@ -229,12 +305,37 @@ class DialerSession {
     }
 
     private stopAudio(): void {
+        this.mediaActive = false;
         this.audioStream?.destroy();
         this.audioStream = null;
+        this.audioWriter?.clear();
+        this.audioWriter?.cancel();
+        this.audioWriter = null;
+    }
+
+    private startRemoteRingback(participant: Participant): void {
+        this.stopRemoteRingback();
+        this.audioWriter = participant.getAudioWriter();
+        const writeTone = () => this.audioWriter?.write(ringbackTone);
+        writeTone();
+        this.ringbackTimer = setInterval(writeTone, ringbackCycleMs);
+    }
+
+    private stopRemoteRingback(): void {
+        if (this.ringbackTimer) clearInterval(this.ringbackTimer);
+        this.ringbackTimer = null;
+        this.audioWriter?.clear();
+    }
+
+    private clearRingTimer(): void {
+        if (this.ringTimer) clearTimeout(this.ringTimer);
+        this.ringTimer = null;
     }
 
     close(): void {
         this.stopAudio();
+        this.clearRingTimer();
+        this.stopRemoteRingback();
         this.client?.disconnect();
         this.client = null;
         this.activeParticipant = null;

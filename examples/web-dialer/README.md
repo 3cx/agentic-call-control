@@ -5,7 +5,7 @@ A TypeScript browser dialer that uses a 3CX programmable DN (RoutePoint) through
 ## Features
 
 - Browser keypad with outbound calling
-- Incoming calls routed to the API application's Client ID or assigned DID
+- Incoming-call screen with local ringtone, accept, reject, and a 30-second timeout
 - Microphone and speaker bridge using 3CX 8 kHz, 16-bit mono PCM streams
 - Mute, hang up, call timer, and recent-call history
 - Credentials are sent once to the local Node process and are never written to browser storage
@@ -42,4 +42,6 @@ The browser sends microphone PCM over a same-origin WebSocket to the local Node 
 
 This is a development sample, not a production softphone. For remote deployment, add HTTPS, user authentication, authorization, rate limiting, origin validation, secure secret storage, and an explicit session policy. The sample supports one active call per browser session.
 
-RoutePoint calls normally arrive already connected. This makes the sample suitable for programmable voice apps but differs from the ringing/answer lifecycle of a conventional registered extension.
+RoutePoint calls normally arrive already connected at the PBX. The incoming-call screen therefore implements a **local virtual ringing phase**: media is withheld until the user presses Accept, but the underlying RoutePoint leg is technically already connected. This differs from the real SIP ringing/answer lifecycle of a conventional registered extension.
+
+To keep conversational latency bounded, the browser captures approximately 20 ms at a time and both sides drop stale audio when their real-time buffers exceed a small limit. Hanging up synchronously clears microphone upload, PBX writer, and browser playback queues.
