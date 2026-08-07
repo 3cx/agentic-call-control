@@ -8,7 +8,7 @@ yarn build
 yarn lint
 ```
 
-From repo root: `yarn start:openai-realtime`
+From repo root: `yarn start:xai`
 
 ## Architecture
 

@@ -1,6 +1,6 @@
-# Agentic Call Control — `cloud/gemini-realtime`
+# Agentic Call Control — `gemini-realtime`
 
-This branch uses the **Google Gemini Live API** — a single WebSocket connection that handles speech recognition, LLM reasoning, and speech synthesis simultaneously.
+This example uses the **Google Gemini Live API** — a single WebSocket connection that handles speech recognition, LLM reasoning, and speech synthesis simultaneously.
 
 ---
 
@@ -27,13 +27,14 @@ Get an API key from [Google AI Studio](https://aistudio.google.com/apikey).
 
 ## Quick Start
 
-From the repo root, copy the config:
+From the **repo root**:
 
 ```bash
+yarn install
 cp examples/gemini-realtime/config.yaml.example examples/gemini-realtime/config.yaml
 ```
 
-Fill in your credentials — open `examples/gemini-realtime/config.yaml`:
+Edit `examples/gemini-realtime/config.yaml`:
 
 ```yaml
 # 3CX Service Principal — Web Client → Admin → Integrations → API
@@ -56,7 +57,7 @@ companyName: Your Company
 agentName: Assistant
 ```
 
-Then start from the repo root:
+Start the example:
 
 ```bash
 yarn start:gemini
@@ -64,10 +65,10 @@ yarn start:gemini
 
 ### Calling the Agent
 
-Once the agent is running, there are two ways to reach it on your 3CX PBX:
+- **Internal call** — dial the Service Principal **Client ID** (`appId`) from any 3CX extension.
+- **External call (DID)** — if you assigned a DID to the Service Principal, callers can dial that number.
 
-- **Internal call** — from any registered 3CX extension (desk phone, web client, or mobile app), dial the **Client ID** (the `appId` you configured, e.g. `assistant`). The PBX routes the call directly to the agent.
-- **External call (DID)** — if you assigned a DID number to the Service Principal (step 6 above), callers can dial that phone number from any external line to reach the agent.
+Agent behavior is configured via `agentProfile` — see [Agent profiles](../../README.md#agent-profiles) in the root README.
 
 ---
 
@@ -159,7 +160,7 @@ After `setupComplete`, a `clientContent` message triggers Gemini to speak the gr
 
 ### Agent Profiles
 
-Agent profiles live in `agents/<name>.yaml` — see `agents/receptionist.yaml` for an example.
+See [Agent profiles](../../README.md#agent-profiles) in the root README. Example: `agents/receptionist.yaml`.
 
 ---
 

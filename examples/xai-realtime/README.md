@@ -1,6 +1,6 @@
-# Agentic Call Control — `cloud/xai-realtime`
+# Agentic Call Control — `xai-realtime`
 
-This branch uses the **xAI Grok Voice Agent API** — a single WebSocket connection that handles speech recognition, LLM reasoning, and speech synthesis simultaneously.
+This example uses the **xAI Grok Voice Agent API** — a single WebSocket connection that handles speech recognition, LLM reasoning, and speech synthesis simultaneously.
 
 ---
 
@@ -10,13 +10,13 @@ This branch uses the **xAI Grok Voice Agent API** — a single WebSocket connect
 
 Create API credentials so the agent can control calls on your PBX:
 
-1. Open your 3CX Admin Console
+1. Open your 3CX Web Client
 2. Go to **Admin → Integrations → API**
 3. Click **Add Service Principal**
 4. Set a **Client ID** (e.g. `assistant`) — this becomes your `appId`
 5. Enable **"Enable access to the 3CX Call Control API for this application"**
-6. Assign a **DID Number** (the phone number callers will dial)
-7. Click **Select Extensions** to choose which extensions the agent can control
+6. *(Optional)* Assign a **DID Number**
+7. *(Optional)* Click **Select Extensions** to choose which extensions the agent can control
 8. **Save** — the generated Client Secret becomes your `appSecret`
 
 ### xAI API Key
@@ -27,23 +27,41 @@ Get an API key from the [xAI Console](https://console.x.ai).
 
 ## Quick Start
 
+From the **repo root**:
+
 ```bash
 yarn install
-cp config.yaml.example config.yaml
-# ⚠️ Edit config.yaml with your credentials before starting (see table below)
-yarn start
+cp examples/xai-realtime/config.yaml.example examples/xai-realtime/config.yaml
 ```
 
-### Credentials
+Edit `examples/xai-realtime/config.yaml`:
 
-Open `config.yaml` and replace the placeholder values:
+```yaml
+appId: your-3cx-app-id
+appSecret: your-3cx-app-secret
+pbxBase: https://your-pbx.3cx.eu:5001
 
-| Field | Where to get it |
-|---|---|
-| `appId` | 3CX Management Console → Voice Apps → your app's Client ID |
-| `appSecret` | 3CX Management Console → Voice Apps → your app's Client Secret |
-| `pbxBase` | Your 3CX PBX URL (e.g. `https://your-pbx.3cx.eu:5001`) |
-| `xaiApiKey` | [xAI Console](https://console.x.ai) |
+xaiApiKey: xai-your-api-key
+# xaiModel: grok-voice-latest
+# xaiVoice: tara
+
+agentProfile: receptionist
+companyName: Your Company
+agentName: Assistant
+```
+
+Start the example:
+
+```bash
+yarn start:xai
+```
+
+### Calling the Agent
+
+- **Internal call** — dial the Service Principal **Client ID** (`appId`) from any 3CX extension.
+- **External call (DID)** — if you assigned a DID to the Service Principal, callers can dial that number.
+
+Agent behavior is configured via `agentProfile` — see [Agent profiles](../../README.md#agent-profiles) in the root README.
 
 ---
 
@@ -74,7 +92,7 @@ xAI calls these as function tools. The app executes them via the 3CX SDK.
 |---|---|---|
 | `transfer_call` | `participant.transfer(ext)` | Waits for audio drain, then transfers. Blocked if screening incomplete. |
 | `drop_call` | `participant.drop()` | Waits for audio drain (caller hears goodbye), then drops. No extra `response.create`. |
-| `transfer_to_voicemail` | `participant.transferToVoiceMail(ext)` | Same guards as transfer |
+| `leave_voicemail` | `participant.transferToVoiceMail(ext)` | Same guards as transfer |
 | `update_screening` | Saves `name`, `company`, or `reason` | **Silent** — no `response.create` after, preventing speech repetition |
 
 ### MCP Tools (PBX Server)
