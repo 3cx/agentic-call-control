@@ -50,6 +50,7 @@ async function main() {
 
         const toolsResult = await mcpClient.listTools();
         const filtered = filterMcpTools(toolsResult.tools, profile?.mcpTools);
+        const filteredNames = new Set(filtered.map((t) => t.name));
 
         mcpToolDefs = filtered.map((t) => ({
             name: t.name,
@@ -58,8 +59,11 @@ async function main() {
         }));
 
         console.log(chalk.cyan(`   MCP tools (${filtered.length}/${toolsResult.tools.length}):`));
-        for (const t of filtered) {
-            console.log(chalk.gray(`     - ${t.name}: ${t.description ?? '(no description)'}`));
+        for (const t of toolsResult.tools) {
+            const enabled = filteredNames.has(t.name);
+            const label = enabled ? chalk.green('✓') : chalk.gray('✗');
+            const color = enabled ? chalk.gray : chalk.dim;
+            console.log(color(`     ${label} ${t.name}: ${t.description ?? '(no description)'}`));
         }
     } catch (err) {
         console.warn(chalk.yellow('[MCP] connection failed, continuing without MCP tools:'), (err as Error).message);
