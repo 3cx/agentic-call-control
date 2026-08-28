@@ -12,7 +12,6 @@ async function main() {
     console.log(chalk.cyan('openai-realtime starting'));
     console.log(chalk.cyan(`   3CX PBX: ${appconfig.pbxBase}`));
     console.log(chalk.cyan(`   OpenAI model: ${appconfig.openaiModel ?? 'gpt-realtime-2'}`));
-    console.log(chalk.cyan(`   OpenAI voice: ${appconfig.openaiVoice ?? 'alloy'}`));
 
     if (!appconfig.openaiApiKey) {
         console.error(chalk.red('Error: openaiApiKey is missing in config.yaml'));
@@ -30,6 +29,8 @@ async function main() {
         console.error(chalk.red('Error: neither agentProfile nor agentInstructions is set in config.yaml'));
         process.exit(1);
     }
+
+    console.log(chalk.cyan(`   OpenAI voice: ${profile?.voice ?? appconfig.openaiVoice ?? 'alloy'}`));
 
     const client = new CallControlClient({
         pbxBase: appconfig.pbxBase,

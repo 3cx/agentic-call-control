@@ -11,7 +11,6 @@ import type { AgentProfile } from './agent/agent-profiles.ts';
 async function main() {
     console.log(chalk.cyan('gemini-realtime starting'));
     console.log(chalk.cyan(`   3CX PBX: ${appconfig.pbxBase}`));
-    console.log(chalk.cyan(`   Gemini Voice: ${appconfig.geminiVoice ?? 'Kore'}`));
 
     if (!appconfig.geminiApiKey) {
         console.error(chalk.red('Error: geminiApiKey is missing in config.yaml'));
@@ -29,6 +28,8 @@ async function main() {
         console.error(chalk.red('Error: neither agentProfile nor agentInstructions is set in config.yaml'));
         process.exit(1);
     }
+
+    console.log(chalk.cyan(`   Gemini Voice: ${profile?.voice ?? appconfig.geminiVoice ?? 'Kore'}`));
 
     const client = new CallControlClient({
         pbxBase: appconfig.pbxBase,

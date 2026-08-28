@@ -5,8 +5,9 @@ pbxBase: https://your-pbx.3cx.eu:5001
 # Google Gemini API key — get from https://aistudio.google.com/apikey
 geminiApiKey: your-gemini-api-key
 
-# Gemini voice (default: Kore). Options: Kore, Charon, Fenrir, Aoede, Puck, etc.
-geminiVoice: Kore
+# Gemini voice fallback when the agent profile has no voice field.
+# Profile voice takes priority (see voice in agents/<profile>.yaml).
+# geminiVoice: Kore
 
 # Gemini model (default: models/gemini-3.1-flash-live-preview)
 geminiModel: models/gemini-3.1-flash-live-preview

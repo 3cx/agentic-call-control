@@ -10,7 +10,7 @@ export interface AppConfig {
 
     openaiApiKey: string;
     openaiModel?: string;
-    openaiVoice?: string;
+    openaiVoice?: string; // Fallback when agent profile has no voice
     openaiVadSilenceDurationMs?: number;
     openaiVadThreshold?: number;
     openaiInputTranscriptionModel?: string;

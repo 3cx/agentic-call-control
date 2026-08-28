@@ -108,6 +108,7 @@ export function createCallStore(
             participant,
             {
                 appConfig,
+                voice: profile?.voice ?? appConfig.openaiVoice ?? 'alloy',
                 instructions,
                 localTools: allTools,
                 greeting,

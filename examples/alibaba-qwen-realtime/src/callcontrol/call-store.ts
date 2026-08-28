@@ -53,13 +53,39 @@ export function createCallStore(
 
         const callState = createCallState(callerName, callerNumber);
 
+        const localToolDefs = buildLocalTools({
+            callScreening: profile?.callScreening,
+        });
+
+        const promptTools = [
+            ...localToolDefs,
+            ...(mcpToolDefs ?? []).map((t) => ({
+                type: 'function' as const,
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.parameters,
+                },
+            })),
+            ...(customMcpRouter?.toolDefs ?? []).map((t) => ({
+                type: 'function' as const,
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.parameters,
+                },
+            })),
+        ];
+
+        const callContext = {
+            company_name: appConfig.companyName ?? '',
+            agent_name: appConfig.agentName ?? '',
+            caller_name: callerName,
+            caller_number: callerNumber,
+        };
+
         const instructions = profile
-            ? renderPrompt(profile, {
-                company_name: appConfig.companyName ?? '',
-                agent_name: appConfig.agentName ?? '',
-                caller_name: callerName,
-                caller_number: callerNumber,
-            })
+            ? renderPrompt(profile, callContext, promptTools)
             : (appConfig.agentInstructions ?? '');
 
         const greeting = profile?.greeting
@@ -67,10 +93,6 @@ export function createCallStore(
                 .replace(/\{\{company_name\}\}/g, appConfig.companyName ?? '')
                 .replace(/\{\{agent_name\}\}/g, appConfig.agentName ?? '')
             : appConfig.initialGreeting ?? '';
-
-        const localToolDefs = buildLocalTools({
-            callScreening: profile?.callScreening,
-        });
 
         const allTools: QwenToolDef[] = [
             ...localToolDefs.map((t): QwenToolDef => ({

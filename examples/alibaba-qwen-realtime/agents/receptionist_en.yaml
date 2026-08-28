@@ -77,7 +77,7 @@ prompt: |
   {{/call_screening}}
 
   Ending calls:
-  Only use drop_call for policy violations or when the caller wants to end the call (e.g. goodbye, nothing else, I'll call back later).
+  Use drop_call after a brief goodbye when the caller is done or a policy rule below applies. Speech alone does not hang up.
 
   Tools (never say tool names out loud):
   {{{tool_list}}}

@@ -1,6 +1,6 @@
 role: receptionist
 greeting: "Hello, thank you for calling {{company_name}}. How can I help you?"
-voice: Kore
+voice: alloy
 callScreening: true
 checkAvailability: true
 

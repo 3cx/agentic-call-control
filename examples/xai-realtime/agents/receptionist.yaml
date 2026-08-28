@@ -1,5 +1,6 @@
 role: receptionist
 greeting: "Hello, thank you for calling {{company_name}}."
+voice: tara
 callScreening: true
 checkAvailability: true
 

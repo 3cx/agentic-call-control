@@ -2,8 +2,6 @@
 
 This example uses the **OpenAI Realtime API** (GA) — a single WebSocket connection that handles speech recognition, LLM reasoning, and speech synthesis simultaneously.
 
-Based on the same bridge pattern as the voice-agent-orchestrator `openai.ts` realtime architecture.
-
 ---
 
 ## Prerequisites
@@ -29,13 +27,14 @@ Get an API key from [OpenAI API Keys](https://platform.openai.com/api-keys) with
 
 ## Quick Start
 
-From the repo root, copy the config:
+From the **repo root**:
 
 ```bash
+yarn install
 cp examples/openai-realtime/config.yaml.example examples/openai-realtime/config.yaml
 ```
 
-Fill in your credentials — open `examples/openai-realtime/config.yaml`:
+Edit `examples/openai-realtime/config.yaml`:
 
 ```yaml
 appId: your-3cx-app-id
@@ -51,16 +50,18 @@ companyName: Your Company
 agentName: Assistant
 ```
 
-Then start from the repo root:
+Start the example:
 
 ```bash
-yarn start:openai-realtime
+yarn start:openai
 ```
 
 ### Calling the Agent
 
 - **Internal call** — dial the Service Principal **Client ID** (`appId`) from any 3CX extension.
 - **External call (DID)** — if you assigned a DID to the Service Principal, callers can dial that number.
+
+Agent behavior is configured via `agentProfile` — see [Agent profiles](../../README.md#agent-profiles) in the root README.
 
 ---
 

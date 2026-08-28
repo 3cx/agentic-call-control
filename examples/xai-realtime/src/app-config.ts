@@ -5,7 +5,7 @@ export interface AppConfig {
 
     xaiApiKey: string;
     xaiModel?: string;
-    xaiVoice?: string;
+    xaiVoice?: string; // Fallback when agent profile has no voice
     xaiVadSilenceDurationMs?: number;
 
     agentProfile?: string;

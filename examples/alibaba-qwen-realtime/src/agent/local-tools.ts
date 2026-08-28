@@ -65,7 +65,7 @@ export const TOOL_DROP_CALL: ChatCompletionFunctionTool = {
     type: 'function',
     function: {
         name: 'drop_call',
-        description: 'Hang up the current call.',
+        description: 'Hang up after a brief goodbye when the caller wants to end the call.',
         parameters: { type: 'object', properties: {} },
     },
 };

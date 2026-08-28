@@ -109,7 +109,7 @@ export function createCallStore(
             {
                 xaiApiKey: appConfig.xaiApiKey,
                 model: appConfig.xaiModel,
-                voice: appConfig.xaiVoice ?? 'tara',
+                voice: profile?.voice ?? appConfig.xaiVoice ?? 'tara',
                 instructions,
                 vadSilenceDurationMs: appConfig.xaiVadSilenceDurationMs,
                 localTools: allTools,
