@@ -101,9 +101,17 @@ Incoming call on 3CX
 | `openaiInputTranscriptionLanguage` | Optional language hint (`en`, etc.) |
 | `voiceBehavior.silenceThreshold` | Mic noise gate (peak amplitude, default 1500) |
 | `voiceBehavior.firstUtteranceDelayMs` | Delay before greeting (default 400 ms) |
-| `customMcpServers` | Optional extra MCP servers (beyond 3CX). Enable tools in `agents/<profile>.yaml` `mcpTools` by exact name |
+| `customMcpServers` | Optional extra MCP servers (beyond 3CX). `none`, `bearer`, or `oauth`. Enable tools in `agents/<profile>.yaml` `mcpTools` by exact name |
 
 Enable MCP / custom tools per agent in `agents/<profile>.yaml` — list each tool under `mcpTools` (e.g. `list_phonebook`, `googlecalendar.quick_add`).
+
+OAuth `authorization_code` servers must be provisioned before `yarn start:openai`:
+
+```bash
+yarn mcp:auth --config examples/openai-realtime/config.yaml GoogleWorkspace
+```
+
+Normal service startup never prompts. If the token store is missing or refresh fails, that server is skipped and the same command is logged. Do not commit `.mcp-tokens/`.
 
 ---
 

@@ -4,7 +4,7 @@ import { createCallStore } from './callcontrol/call-store.ts';
 import { connectMcp, filterMcpTools, connectCustomMcpServers } from '@3cx-examples/mcp';
 import type { CustomMcpRouter } from '@3cx-examples/mcp';
 import type { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import appconfig from './app-config.ts';
+import appconfig, { CONFIG_PATH } from './app-config.ts';
 import { loadAgentProfile } from './agent/agent-profiles.ts';
 import type { AgentProfile } from './agent/agent-profiles.ts';
 
@@ -74,6 +74,7 @@ async function main() {
     const customMcpRouter: CustomMcpRouter | undefined = await connectCustomMcpServers(
         appconfig.customMcpServers,
         profile?.mcpTools,
+        { configPath: CONFIG_PATH },
     );
 
     createCallStore(client, appconfig, profile, mcpClient, mcpToolDefs, customMcpRouter);

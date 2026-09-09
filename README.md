@@ -6,7 +6,7 @@ All examples use a **single realtime audio stream** (OpenAI Realtime, Gemini Liv
 
 All examples support the **3CX MCP server** for phonebook lookups and contact management.
 
-Optional **extra MCP servers** (calendars, CRMs, etc.) can be added via `customMcpServers` in each example’s `config.yaml`. Each server supports token-based authentication — `bearer` (with a token) or `none` for unauthenticated servers:
+Optional **extra MCP servers** (calendars, CRMs, etc.) can be added via `customMcpServers` in each example’s `config.yaml`. Authentication is `none`, `bearer`, or `oauth`.
 
 ```yaml
 customMcpServers:
@@ -22,7 +22,37 @@ customMcpServers:
     auth:
       type: none
     enabled: true
+
+  - name: ServiceCrm
+    url: https://mcp.example.com/mcp
+    auth:
+      type: oauth
+      grant: client_credentials   # default when type=oauth
+      clientId: your-client-id
+      clientSecret: your-client-secret
+      scope: "mcp:tools"
+    enabled: true
+
+  - name: GoogleWorkspace
+    url: https://mcp.example.com/mcp
+    auth:
+      type: oauth
+      grant: authorization_code
+      clientId: your-client-id
+      clientSecret: your-client-secret
+      redirectUri: http://127.0.0.1:8765/callback
+      tokenStore: .mcp-tokens/googleworkspace.json
+      scope: "mcp:tools"
+    enabled: true
 ```
+
+OAuth servers must advertise RFC 9728 / RFC 8414 metadata. `client_credentials` is silent at startup. `authorization_code` is provisioned **ahead of** `yarn start:*` — never during a live call:
+
+```bash
+yarn mcp:auth --config examples/openai-realtime/config.yaml GoogleWorkspace
+```
+
+The command prints an authorization URL and SSH-tunnel instructions (`ssh -L 8765:127.0.0.1:8765 <user>@<pbx-host>`), waits for the loopback callback, and writes `tokenStore` with mode `0600`. Do not commit token-store files (see `.mcp-tokens/`). If refresh later fails, startup skips that server and logs the same `yarn mcp:auth --config …` command.
 
 Tools from those servers are merged with 3CX MCP. Only tools listed in the agent profile `mcpTools` are exposed to the model — add each tool by its exact name (e.g. `googlecalendar.quick_add`) in `agents/<profile>.yaml`:
 

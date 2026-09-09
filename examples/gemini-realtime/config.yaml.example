@@ -49,3 +49,29 @@ customMcpServers:
      auth:
        type: none
      enabled: true
+
+   # OAuth machine-to-machine (no operator interaction). The MCP server must
+   # advertise RFC 9728 / RFC 8414 metadata. Do not commit token-store files.
+   # - name: ServiceCrm
+   #   url: https://mcp.example.com/mcp
+   #   auth:
+   #     type: oauth
+   #     grant: client_credentials
+   #     clientId: your-client-id
+   #     clientSecret: your-client-secret
+   #     scope: "mcp:tools"
+   #   enabled: true
+
+   # OAuth authorization code. Provision once, then start the agent:
+   #   yarn mcp:auth --config examples/gemini-realtime/config.yaml GoogleWorkspace
+   # - name: GoogleWorkspace
+   #   url: https://mcp.example.com/mcp
+   #   auth:
+   #     type: oauth
+   #     grant: authorization_code
+   #     clientId: your-client-id
+   #     clientSecret: your-client-secret
+   #     redirectUri: http://127.0.0.1:8765/callback
+   #     tokenStore: .mcp-tokens/googleworkspace.json
+   #     scope: "mcp:tools"
+   #   enabled: true
