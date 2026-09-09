@@ -29,6 +29,27 @@ test('bearer requires token', () => {
     if (auth.type === 'bearer') assert.equal(auth.token, 'abc');
 });
 
+test('auth grants reject fields from other variants', () => {
+    assert.throws(() => normalizeCustomMcpAuth('s', {
+        type: 'bearer',
+        token: 'abc',
+        clientId: 'unexpected',
+    }, cfg), /auth\.clientId/);
+    assert.throws(() => normalizeCustomMcpAuth('s', {
+        type: 'oauth',
+        clientId: 'id',
+        clientSecret: 'secret',
+        token: 'unexpected',
+    }, cfg), /auth\.token/);
+    assert.throws(() => normalizeCustomMcpAuth('s', {
+        type: 'oauth',
+        grant: 'authorization_code',
+        clientId: 'id',
+        tokenStore: 'tokens.json',
+        token: 'unexpected',
+    }, cfg), /auth\.token/);
+});
+
 test('oauth defaults to client_credentials', () => {
     const auth = normalizeCustomMcpAuth('s', {
         type: 'oauth',
@@ -127,4 +148,13 @@ test('relative tokenStore is config-relative', async () => {
     if (auth.type === 'oauth' && auth.grant === 'authorization_code') {
         assert.equal(auth.tokenStore, join(dir, 'tokens/a.json'));
     }
+});
+
+test('authorization_code requires an explicit config path', () => {
+    assert.throws(() => normalizeCustomMcpAuth('s', {
+        type: 'oauth',
+        grant: 'authorization_code',
+        clientId: 'id',
+        tokenStore: 'tokens/a.json',
+    }, ''), /configPath/);
 });

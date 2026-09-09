@@ -55,11 +55,11 @@ export class FileBackedAuthCodeProvider implements OAuthClientProvider {
         };
     }
 
-    state(): string {
+    async state(): Promise<string> {
         if (this.memoryState) return this.memoryState;
         const state = randomBytes(32).toString('hex');
         this.memoryState = state;
-        void this.store.update((current) => ({ ...current, expectedState: state }));
+        await this.store.update((current) => ({ ...current, expectedState: state }));
         return state;
     }
 

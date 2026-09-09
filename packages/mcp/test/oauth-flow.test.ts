@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { PassThrough } from 'node:stream';
 import { connectCustomMcpServers } from '../src/custom-mcp-client.ts';
 import { runMcpAuth } from '../src/mcp-auth-cli.ts';
-import { FileTokenStore, TOKEN_STORE_VERSION } from '../src/oauth-token-store.ts';
+import { FileTokenStore, TOKEN_STORE_VERSION, TokenStoreLock } from '../src/oauth-token-store.ts';
 import { startLoopbackCallback } from '../src/oauth-callback-server.ts';
 import { startOAuthMcpFixture } from './helpers/oauth-mcp-fixture.ts';
 
@@ -42,6 +42,12 @@ test('none, omitted auth, and bearer connect without OAuth provider', async () =
             { name: 'Omitted', url: 'http://127.0.0.1:1/mcp', enabled: true },
         ], undefined, { configPath });
         assert.equal(omitted, undefined);
+
+        const bearer = await connectCustomMcpServers([
+            { name: 'Bearer', url: fixture.mcpUrl, auth: { type: 'bearer', token: 'access-token' } },
+        ], 'all');
+        assert.ok(bearer?.toolDefs.some((tool) => tool.name === 'whoami'));
+        await bearer?.disconnectAll();
     } finally {
         await fixture.close();
     }
@@ -103,6 +109,43 @@ test('client_credentials renews after a simulated 401', async () => {
         assert.ok(router);
         assert.ok(calls >= 1);
         assert.ok(fixture.tokenRequests.filter((r) => r.grant === 'client_credentials').length >= 1);
+    } finally {
+        await fixture.close();
+    }
+});
+
+test('client_credentials performs only one outer reconnect after SDK recovery is exhausted', async () => {
+    let remainingRejectedRequests = 0;
+    const fixture = await startOAuthMcpFixture({
+        clientId: 'cid',
+        clientSecret: 'csecret',
+        rejectBearer: () => {
+            if (remainingRejectedRequests === 0) return false;
+            remainingRejectedRequests -= 1;
+            return true;
+        },
+    });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-cc-bounded-'));
+    const configPath = join(dir, 'config.yaml');
+    await writeFile(configPath, 'x: 1\n');
+    try {
+        const router = await connectCustomMcpServers([{
+            name: 'ServiceCrm',
+            url: fixture.mcpUrl,
+            auth: { type: 'oauth', clientId: 'cid', clientSecret: 'csecret' },
+        }], 'all', { configPath });
+        assert.ok(router?.has('whoami'));
+        const initializationsBeforeFailure = fixture.mcpMethods.filter((method) => method === 'initialize').length;
+        const tokensBeforeFailure = fixture.tokenRequests.length;
+        remainingRejectedRequests = 2;
+        const result = await router!.callTool('whoami', {});
+        assert.match(result, /fixture-user/);
+        assert.equal(
+            fixture.mcpMethods.filter((method) => method === 'initialize').length - initializationsBeforeFailure,
+            1,
+        );
+        assert.equal(fixture.tokenRequests.length - tokensBeforeFailure, 2);
+        await router!.disconnectAll();
     } finally {
         await fixture.close();
     }
@@ -227,14 +270,15 @@ test('invalid refresh token skips only that server and does not read stdin', asy
                 },
             },
             {
-                name: 'LocalTools',
+                name: 'WorkingBearer',
                 url: fixture.mcpUrl,
-                auth: { type: 'none' },
+                auth: { type: 'bearer', token: 'access-token' },
             },
         ], 'all', { configPath });
         assert.equal(stdinRead, false);
         assert.ok(logs.some((l) => l.includes('yarn mcp:auth --config')));
-        assert.ok(!router || !router.toolDefs.some((t) => t.name === 'whoami') || router.allToolDefs.length >= 0);
+        assert.ok(router?.toolDefs.some((t) => t.name === 'whoami'));
+        await router?.disconnectAll();
     } finally {
         console.warn = origWarn;
         await fixture.close();
@@ -242,10 +286,11 @@ test('invalid refresh token skips only that server and does not read stdin', asy
 });
 
 test('authorization_code callTool unauthorized returns promptly', async () => {
+    let rejectBearer = false;
     const fixture = await startOAuthMcpFixture({
         clientId: 'cid',
         clientSecret: 'csecret',
-        rejectBearer: () => true,
+        rejectBearer: () => rejectBearer,
     });
     const dir = await mkdtemp(join(tmpdir(), 'mcp-call-'));
     const configPath = join(dir, 'config.yaml');
@@ -268,15 +313,69 @@ test('authorization_code callTool unauthorized returns promptly', async () => {
                 },
             },
         ], 'all', { configPath });
-        if (!router) {
-            // connect skipped due to 401 — still proves no stdin wait
-            return;
-        }
+        assert.ok(router?.has('whoami'));
+        rejectBearer = true;
         const started = Date.now();
-        const result = await router.callTool('whoami', {});
+        const result = await router!.callTool('whoami', {});
         assert.ok(Date.now() - started < 5000);
         assert.match(result, /MCP unavailable/);
         assert.match(result, /yarn mcp:auth/);
+    } finally {
+        await fixture.close();
+    }
+});
+
+test('non-TTY authorization exits promptly when aborted', async () => {
+    const fixture = await startOAuthMcpFixture({ clientId: 'cid', clientSecret: 'csecret' });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-abort-'));
+    const configPath = join(dir, 'config.yaml');
+    await writeFile(configPath, `
+customMcpServers:
+  - name: AbortServer
+    url: ${fixture.mcpUrl}
+    auth:
+      type: oauth
+      grant: authorization_code
+      clientId: cid
+      clientSecret: csecret
+      redirectUri: http://127.0.0.1:18772/callback
+      tokenStore: tokens.json
+`);
+    const stdoutChunks: string[] = [];
+    const stdout = new PassThrough();
+    stdout.on('data', (chunk) => stdoutChunks.push(String(chunk)));
+    const abort = new AbortController();
+    try {
+        const run = runMcpAuth(['--config', configPath, 'AbortServer'], {
+            stdin: new PassThrough(),
+            stdout,
+            stderr: new PassThrough(),
+            signal: abort.signal,
+            timeoutMs: 10_000,
+        });
+        const started = Date.now();
+        while (!stdoutChunks.join('').includes('Waiting for the callback')) {
+            assert.ok(Date.now() - started < 5000, 'authorization command did not start');
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        abort.abort();
+        const exit = await Promise.race([
+            run,
+            new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('abort did not stop CLI')), 1000)),
+        ]);
+        assert.equal(exit, 1);
+        assert.ok(Date.now() - started < 5000);
+
+        const replacementListener = startLoopbackCallback({
+            redirectUri: 'http://127.0.0.1:18772/callback',
+            expectedState: 'replacement-state',
+            timeoutMs: 1000,
+        });
+        await replacementListener.ready();
+        await replacementListener.close();
+
+        const replacementLock = await TokenStoreLock.acquire(join(dir, 'tokens.json'));
+        await replacementLock.release();
     } finally {
         await fixture.close();
     }

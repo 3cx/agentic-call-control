@@ -75,6 +75,20 @@ function optionalString(value: unknown): string | undefined {
     return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function rejectUnexpectedFields(
+    serverName: string,
+    record: Record<string, unknown>,
+    allowed: readonly string[],
+    prefix: string,
+): void {
+    const allowedSet = new Set(allowed);
+    for (const field of Object.keys(record)) {
+        if (!allowedSet.has(field)) {
+            throw new CustomMcpConfigError(serverName, `${prefix}${field}`, 'not allowed');
+        }
+    }
+}
+
 export function normalizeCustomMcpAuth(
     serverName: string,
     raw: unknown,
@@ -91,24 +105,14 @@ export function normalizeCustomMcpAuth(
     const type = optionalString(auth.type) ?? 'none';
 
     if (type === 'none') {
-        const forbidden = ['token', 'clientId', 'clientSecret', 'grant', 'tokenStore', 'redirectUri', 'scope'];
-        for (const field of forbidden) {
-            if (auth[field] !== undefined) {
-                throw new CustomMcpConfigError(serverName, `auth.${field}`, `not allowed when type is none`);
-            }
-        }
+        rejectUnexpectedFields(serverName, auth, ['type'], 'auth.');
         return { type: 'none' };
     }
 
     if (type === 'bearer') {
+        rejectUnexpectedFields(serverName, auth, ['type', 'token'], 'auth.');
         if (typeof auth.token !== 'string' || auth.token.length === 0) {
             throw new CustomMcpConfigError(serverName, 'auth.token', 'required for bearer auth');
-        }
-        if (auth.tokenStore !== undefined) {
-            throw new CustomMcpConfigError(serverName, 'auth.tokenStore', 'forbidden unless grant is authorization_code');
-        }
-        if (auth.grant !== undefined) {
-            throw new CustomMcpConfigError(serverName, 'auth.grant', 'not allowed for bearer auth');
         }
         return { type: 'bearer', token: auth.token };
     }
@@ -125,15 +129,15 @@ export function normalizeCustomMcpAuth(
     const scope = optionalString(auth.scope);
 
     if (grant === 'client_credentials') {
+        rejectUnexpectedFields(
+            serverName,
+            auth,
+            ['type', 'grant', 'clientId', 'clientSecret', 'scope'],
+            'auth.',
+        );
         const clientSecret = optionalString(auth.clientSecret);
         if (!clientSecret) {
             throw new CustomMcpConfigError(serverName, 'auth.clientSecret', 'required for client_credentials');
-        }
-        if (auth.tokenStore !== undefined) {
-            throw new CustomMcpConfigError(serverName, 'auth.tokenStore', 'forbidden unless grant is authorization_code');
-        }
-        if (auth.redirectUri !== undefined) {
-            throw new CustomMcpConfigError(serverName, 'auth.redirectUri', 'forbidden for client_credentials');
         }
         return {
             type: 'oauth',
@@ -145,9 +149,18 @@ export function normalizeCustomMcpAuth(
     }
 
     if (grant === 'authorization_code') {
+        rejectUnexpectedFields(
+            serverName,
+            auth,
+            ['type', 'grant', 'clientId', 'clientSecret', 'redirectUri', 'tokenStore', 'scope'],
+            'auth.',
+        );
         const tokenStore = optionalString(auth.tokenStore);
         if (!tokenStore) {
             throw new CustomMcpConfigError(serverName, 'auth.tokenStore', 'required for authorization_code');
+        }
+        if (!configPath) {
+            throw new CustomMcpConfigError(serverName, 'auth.tokenStore', 'configPath is required to resolve token stores');
         }
         const redirectUri = optionalString(auth.redirectUri) ?? DEFAULT_REDIRECT_URI;
         parseLoopbackRedirectUri(redirectUri, serverName);
@@ -181,14 +194,21 @@ export function normalizeCustomMcpServer(
     if (!name) {
         throw new CustomMcpConfigError(`#${index}`, 'name', 'required');
     }
+    rejectUnexpectedFields(name, rec, ['name', 'url', 'auth', 'enabled'], '');
+    if (rec.enabled !== undefined && typeof rec.enabled !== 'boolean') {
+        throw new CustomMcpConfigError(name, 'enabled', 'must be a boolean');
+    }
     const url = optionalString(rec.url);
     if (!url) {
         throw new CustomMcpConfigError(name, 'url', 'required');
     }
     try {
-        new URL(url);
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            throw new Error('unsupported protocol');
+        }
     } catch {
-        throw new CustomMcpConfigError(name, 'url', 'malformed URL');
+        throw new CustomMcpConfigError(name, 'url', 'must be an http or https URL');
     }
     return {
         name,

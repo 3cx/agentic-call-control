@@ -16,6 +16,7 @@ export interface OAuthMcpFixture {
     issuer: string;
     port: number;
     tokenRequests: Array<{ grant?: string; authorization?: string }>;
+    mcpMethods: string[];
     issuedCodes: string[];
     close(): Promise<void>;
     issueAuthorizationCode(): string;
@@ -48,6 +49,7 @@ export async function startOAuthMcpFixture(opts: FixtureOptions): Promise<OAuthM
     const refreshToken = opts.refreshToken ?? 'refresh-token';
     const issuedCodes: string[] = [];
     const tokenRequests: Array<{ grant?: string; authorization?: string }> = [];
+    const mcpMethods: string[] = [];
     let bearerHits = 0;
 
     let baseUrl = '';
@@ -138,7 +140,8 @@ export async function startOAuthMcpFixture(opts: FixtureOptions): Promise<OAuthM
             const authz = req.headers.authorization ?? '';
             const token = authz.startsWith('Bearer ') ? authz.slice(7) : '';
             bearerHits += 1;
-            if (!token || (opts.rejectBearer?.(token, bearerHits) ?? false) || (token !== accessToken && token !== `${accessToken}-refreshed`)) {
+            const rejectBearer = req.method === 'POST' && (opts.rejectBearer?.(token, bearerHits) ?? false);
+            if (!token || rejectBearer || (token !== accessToken && token !== `${accessToken}-refreshed`)) {
                 res.writeHead(401, {
                     'WWW-Authenticate': `Bearer error="invalid_token", resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
                 });
@@ -158,6 +161,7 @@ export async function startOAuthMcpFixture(opts: FixtureOptions): Promise<OAuthM
             }
             const raw = await readBody(req);
             const message = raw ? JSON.parse(raw) as { id?: unknown; method?: string; params?: { protocolVersion?: string; name?: string } } : {};
+            if (message.method) mcpMethods.push(message.method);
             if (message.method === 'initialize') {
                 sendJson(res, 200, {
                     jsonrpc: '2.0',
@@ -225,6 +229,7 @@ export async function startOAuthMcpFixture(opts: FixtureOptions): Promise<OAuthM
         issuer,
         port,
         tokenRequests,
+        mcpMethods,
         issuedCodes,
         issueAuthorizationCode() {
             const code = `code-${randomUUID()}`;

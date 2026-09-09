@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, open, readFile, realpath, unlink } from 'node:fs/p
 import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
+import { OAuthTokensSchema, type OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 
 export const TOKEN_STORE_VERSION = 1;
 
@@ -94,19 +94,20 @@ function parseStore(raw: string): TokenStoreFile {
         throw new TokenStoreError('malformed token store');
     }
     const rec = parsed as Record<string, unknown>;
+    const allowedFields = new Set(['version', 'tokens', 'codeVerifier', 'expectedState', 'discovery']);
+    if (Object.keys(rec).some((field) => !allowedFields.has(field))) {
+        throw new TokenStoreError('malformed token store');
+    }
     if (rec.version !== TOKEN_STORE_VERSION) {
         throw new TokenStoreError('unsupported token store version');
     }
     const store: TokenStoreFile = { version: TOKEN_STORE_VERSION };
     if (rec.tokens !== undefined) {
-        if (!rec.tokens || typeof rec.tokens !== 'object') {
+        const result = OAuthTokensSchema.safeParse(rec.tokens);
+        if (!result.success) {
             throw new TokenStoreError('malformed token store');
         }
-        const tokens = rec.tokens as Record<string, unknown>;
-        if (typeof tokens.access_token !== 'string' || typeof tokens.token_type !== 'string') {
-            throw new TokenStoreError('malformed token store');
-        }
-        store.tokens = tokens as OAuthTokens;
+        store.tokens = result.data;
     }
     if (rec.codeVerifier !== undefined) {
         if (typeof rec.codeVerifier !== 'string') throw new TokenStoreError('malformed token store');
@@ -185,11 +186,15 @@ export class FileTokenStore {
         closeSync(fd);
         try {
             await chmod(tmp, 0o600);
-            renameSync(tmp, this.path);
+            this.renameTempFile(tmp);
         } catch (err) {
             try { unlinkSync(tmp); } catch { /* ignore */ }
             throw err;
         }
+    }
+
+    protected renameTempFile(tmp: string): void {
+        renameSync(tmp, this.path);
     }
 
     async update(mutator: (current: TokenStoreFile) => TokenStoreFile): Promise<TokenStoreFile> {

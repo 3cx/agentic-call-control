@@ -57,15 +57,33 @@ test('loopback listener accepts one GET callback and rejects replay', async () =
         timeoutMs: 5000,
     });
     await listener.ready();
-    const wait = listener.wait();
     const res = await fetch(`http://127.0.0.1:18765/callback?code=thecode&state=${state}`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('cache-control'), 'no-store');
     const html = await res.text();
     assert.doesNotMatch(html, /thecode/);
     assert.doesNotMatch(html, new RegExp(state));
-    const result = await wait;
+    const replay = await fetch(`http://127.0.0.1:18765/callback?code=thecode&state=${state}`);
+    assert.equal(replay.status, 409);
+    const result = await listener.wait();
     assert.equal(result.code, 'thecode');
+});
+
+test('configured issuer is validated before returning a success page', async () => {
+    const listener = startLoopbackCallback({
+        redirectUri: 'http://127.0.0.1:18769/callback',
+        expectedState: state,
+        timeoutMs: 2000,
+    });
+    await listener.ready();
+    listener.configureIssuer('http://issuer.example', true);
+    const rejection = assert.rejects(listener.wait(), /Issuer mismatch/);
+    const response = await fetch(
+        `http://127.0.0.1:18769/callback?code=thecode&state=${state}&iss=${encodeURIComponent('http://wrong.example')}`,
+    );
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /Authorization failed/);
+    await rejection;
 });
 
 test('wrong method and path fail closed', async () => {

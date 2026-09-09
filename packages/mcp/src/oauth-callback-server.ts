@@ -37,6 +37,7 @@ export interface CallbackListener {
     redirectUrl: URL;
     ready(): Promise<void>;
     wait(): Promise<ValidatedCallback>;
+    configureIssuer(expectedIssuer: string | undefined, required: boolean): void;
     acceptPastedCallbackUrl(raw: string): void;
     close(): Promise<void>;
 }
@@ -125,6 +126,8 @@ export function startLoopbackCallback(opts: {
 }): CallbackListener {
     const redirectUrl = parseLoopbackRedirectUri(opts.redirectUri);
     const timeoutMs = opts.timeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS;
+    let expectedIssuer = opts.expectedIssuer;
+    let issuerRequired = opts.issuerRequired === true;
 
     let settled = false;
     let consumed = false;
@@ -163,8 +166,8 @@ export function startLoopbackCallback(opts: {
             const result = validateCallbackSearchParams({
                 params,
                 expectedState: opts.expectedState,
-                expectedIssuer: discoveredIssuer(opts.expectedIssuer),
-                issuerRequired: opts.issuerRequired === true,
+                expectedIssuer: discoveredIssuer(expectedIssuer),
+                issuerRequired,
             });
             if (res) send(res, 200, SUCCESS_PAGE);
             finishOk(result);
@@ -251,6 +254,13 @@ export function startLoopbackCallback(opts: {
             } finally {
                 await closeServer();
             }
+        },
+        configureIssuer(issuer: string | undefined, required: boolean) {
+            if (consumed || settled) {
+                throw new OAuthCallbackError('Authorization callback already used');
+            }
+            expectedIssuer = issuer;
+            issuerRequired = required;
         },
         acceptPastedCallbackUrl(raw: string) {
             const params = parsePastedCallbackUrl(raw, redirectUrl);

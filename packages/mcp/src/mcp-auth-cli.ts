@@ -102,12 +102,20 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
 
     let lock: TokenStoreLock | undefined;
     let listener: ReturnType<typeof startLoopbackCallback> | undefined;
+    let client: Client | undefined;
+    let transport: StreamableHTTPClientTransport | undefined;
+    let verifyClient: Client | undefined;
+    let verifyTransport: StreamableHTTPClientTransport | undefined;
     const timeoutMs = io.timeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS;
 
     const abort = new AbortController();
-    const onAbort = () => abort.abort();
+    const onAbort = () => {
+        abort.abort();
+        void listener?.close();
+    };
     io.signal?.addEventListener('abort', onAbort);
-    const onSig = () => abort.abort();
+    if (io.signal?.aborted) onAbort();
+    const onSig = onAbort;
     process.on('SIGINT', onSig);
     process.on('SIGTERM', onSig);
 
@@ -130,19 +138,22 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
         });
         await provider.store.assertWritableTarget();
 
-        const expectedState = provider.state();
+        const expectedState = await provider.state();
         listener = startLoopbackCallback({
             redirectUri: server.auth.redirectUri,
             expectedState,
             timeoutMs,
         });
         await listener.ready();
+        if (abort.signal.aborted) {
+            throw new OAuthCallbackError('Authorization cancelled');
+        }
 
-        const client = new Client(
+        client = new Client(
             { name: 'agentic-call-control', version: '1.0.0' },
             { capabilities: {} },
         );
-        const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+        transport = new StreamableHTTPClientTransport(new URL(server.url), {
             authProvider: provider,
         });
 
@@ -157,6 +168,11 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
         }
 
         if (!alreadyAuthorized) {
+            const discovery = await provider.discoveryState();
+            const expectedIssuer = discoveredIssuer(discovery);
+            const requiresIssuer = issuerRequired(discovery);
+            listener.configureIssuer(expectedIssuer, requiresIssuer);
+
             const authUrl = provider.takeAuthorizationUrl();
             if (!authUrl) {
                 throw new Error('Authorization URL was not produced by the SDK');
@@ -193,9 +209,7 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
                 throw new OAuthCallbackError('Authorization cancelled');
             }
 
-            const discovery = await provider.discoveryState();
-            const expectedIssuer = discoveredIssuer(discovery);
-            if (issuerRequired(discovery) && !callback.iss) {
+            if (requiresIssuer && !callback.iss) {
                 throw new OAuthCallbackError('Missing issuer');
             }
             if (callback.iss && expectedIssuer && callback.iss !== expectedIssuer) {
@@ -206,11 +220,11 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
             await client.close().catch(() => undefined);
             await transport.close().catch(() => undefined);
 
-            const verifyClient = new Client(
+            verifyClient = new Client(
                 { name: 'agentic-call-control', version: '1.0.0' },
                 { capabilities: {} },
             );
-            const verifyTransport = new StreamableHTTPClientTransport(new URL(server.url), {
+            verifyTransport = new StreamableHTTPClientTransport(new URL(server.url), {
                 authProvider: provider,
             });
             await verifyClient.connect(verifyTransport);
@@ -247,6 +261,10 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
         process.off('SIGINT', onSig);
         process.off('SIGTERM', onSig);
         io.signal?.removeEventListener('abort', onAbort);
+        try { await verifyClient?.close(); } catch { /* ignore */ }
+        try { await verifyTransport?.close(); } catch { /* ignore */ }
+        try { await client?.close(); } catch { /* ignore */ }
+        try { await transport?.close(); } catch { /* ignore */ }
         try { await listener?.close(); } catch { /* ignore */ }
         try { await lock?.release(); } catch { /* ignore */ }
     }
