@@ -39,10 +39,8 @@ export interface ConnectCustomMcpOptions {
     configPath: string;
 }
 
-const MCP_UNAVAILABLE = (name: string, extra?: string) => (
-    extra
-        ? `MCP unavailable — could not reach tool "${name}". ${extra}`
-        : `MCP unavailable — could not reach tool "${name}". Try again later.`
+const MCP_UNAVAILABLE = (name: string) => (
+    `MCP unavailable — could not reach tool "${name}". Try again later.`
 );
 
 function isOAuthCredentialFailure(err: unknown): boolean {
@@ -50,6 +48,13 @@ function isOAuthCredentialFailure(err: unknown): boolean {
         || err instanceof InteractiveAuthRequiredError
         || err instanceof OAuthError
         || (err instanceof StreamableHTTPError && err.code === 401);
+}
+
+function isConnectionClosed(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const rec = err as { code?: unknown; message?: unknown };
+    if (rec.code === -32000) return true;
+    return typeof rec.message === 'string' && /connection closed/i.test(rec.message);
 }
 
 function authHeaders(auth: NormalizedCustomMcpServer['auth']): Record<string, string> {
@@ -213,44 +218,60 @@ export class CustomMcpConnection {
         }
     }
 
-    async callTool(name: string, args: Record<string, unknown>): Promise<string> {
-        if (this.unavailableMessage) {
-            return MCP_UNAVAILABLE(name, this.unavailableMessage);
+    private async invokeTool(name: string, args: Record<string, unknown>): Promise<string> {
+        if (!this.client) return MCP_UNAVAILABLE(name);
+        const result = await this.client.callTool({ name, arguments: args });
+        if (result.isError) {
+            const errText = typeof result.content === 'string'
+                ? result.content
+                : JSON.stringify(result.content);
+            throw new Error(`Custom MCP tool "${name}" error: ${errText}`);
         }
-        if (!this.client) throw new Error(`CustomMCP "${this.name}" not connected`);
+        if (typeof result.content === 'string') return result.content;
+        if (Array.isArray(result.content)) {
+            return result.content
+                .map((c) => {
+                    if (typeof c === 'string') return c;
+                    if (c.type === 'text') return (c as { text: string }).text;
+                    return JSON.stringify(c);
+                })
+                .join('\n');
+        }
+        return JSON.stringify(result.content);
+    }
+
+    async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+        if (this.connectFlight) {
+            try {
+                await this.connectFlight;
+            } catch {
+                return MCP_UNAVAILABLE(name);
+            }
+        }
+        if (this.unavailableMessage || !this.client) {
+            return MCP_UNAVAILABLE(name);
+        }
         try {
-            const result = await this.client.callTool({ name, arguments: args });
-            if (result.isError) {
-                const errText = typeof result.content === 'string'
-                    ? result.content
-                    : JSON.stringify(result.content);
-                throw new Error(`Custom MCP tool "${name}" error: ${errText}`);
-            }
-            if (typeof result.content === 'string') return result.content;
-            if (Array.isArray(result.content)) {
-                return result.content
-                    .map((c) => {
-                        if (typeof c === 'string') return c;
-                        if (c.type === 'text') return (c as { text: string }).text;
-                        return JSON.stringify(c);
-                    })
-                    .join('\n');
-            }
-            return JSON.stringify(result.content);
+            return await this.invokeTool(name, args);
         } catch (err) {
             if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'authorization_code' && isOAuthCredentialFailure(err)) {
                 const cmd = this.recoveryCommand();
                 await this.markUnavailable(`Authorize with: ${cmd}`);
-                return MCP_UNAVAILABLE(name, `Authorize with: ${cmd}`);
+                return MCP_UNAVAILABLE(name);
             }
             if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'client_credentials' && isOAuthCredentialFailure(err)) {
                 try {
                     await this.reconnectAfterUnauthorized();
-                    if (!this.client) return MCP_UNAVAILABLE(name);
-                    const retry = await this.client.callTool({ name, arguments: args });
-                    if (retry.isError) return MCP_UNAVAILABLE(name);
-                    if (typeof retry.content === 'string') return retry.content;
-                    return JSON.stringify(retry.content);
+                    return await this.invokeTool(name, args);
+                } catch {
+                    return MCP_UNAVAILABLE(name);
+                }
+            }
+            if (this.connectFlight || isConnectionClosed(err)) {
+                try {
+                    if (this.connectFlight) await this.connectFlight;
+                    if (this.unavailableMessage || !this.client) return MCP_UNAVAILABLE(name);
+                    return await this.invokeTool(name, args);
                 } catch {
                     return MCP_UNAVAILABLE(name);
                 }

@@ -97,3 +97,11 @@ test('exclusive lock rejects a second writer', async () => {
     const second = await TokenStoreLock.acquire(path);
     await second.release();
 });
+
+test('stale lock from a dead pid is stolen', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-store-'));
+    const path = join(dir, 'a.json');
+    await writeFile(`${path}.lock`, '2147483647\n', { mode: 0o600 });
+    const lock = await TokenStoreLock.acquire(path);
+    await lock.release();
+});

@@ -7,6 +7,7 @@ export interface FixtureOptions {
     accessToken?: string;
     refreshToken?: string;
     issuerRequired?: boolean;
+    requireAuth?: boolean;
     rejectBearer?: (token: string, n: number) => boolean;
 }
 
@@ -141,7 +142,8 @@ export async function startOAuthMcpFixture(opts: FixtureOptions): Promise<OAuthM
             const token = authz.startsWith('Bearer ') ? authz.slice(7) : '';
             bearerHits += 1;
             const rejectBearer = req.method === 'POST' && (opts.rejectBearer?.(token, bearerHits) ?? false);
-            if (!token || rejectBearer || (token !== accessToken && token !== `${accessToken}-refreshed`)) {
+            const requireAuth = opts.requireAuth !== false;
+            if (requireAuth && (!token || rejectBearer || (token !== accessToken && token !== `${accessToken}-refreshed`))) {
                 res.writeHead(401, {
                     'WWW-Authenticate': `Bearer error="invalid_token", resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
                 });

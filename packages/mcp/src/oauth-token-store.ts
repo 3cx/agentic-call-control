@@ -36,6 +36,34 @@ function lockPathFor(storePath: string): string {
     return `${storePath}.lock`;
 }
 
+function pidIsAlive(pid: number): boolean {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (err) {
+        return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+    }
+}
+
+async function stealStaleLock(lockPath: string): Promise<boolean> {
+    let pidText: string;
+    try {
+        pidText = (await readFile(lockPath, 'utf8')).trim();
+    } catch (err) {
+        return (err as NodeJS.ErrnoException).code === 'ENOENT';
+    }
+    const pid = Number.parseInt(pidText, 10);
+    if (Number.isInteger(pid) && pid > 0 && pidIsAlive(pid)) {
+        return false;
+    }
+    try {
+        await unlink(lockPath);
+        return true;
+    } catch (err) {
+        return (err as NodeJS.ErrnoException).code === 'ENOENT';
+    }
+}
+
 export class TokenStoreLock {
     private released = false;
     private readonly lockPath: string;
@@ -54,17 +82,19 @@ export class TokenStoreLock {
         } catch {
             // best-effort on existing dirs we don't own
         }
-        try {
-            const handle = await open(lockPath, 'wx', 0o600);
-            await handle.writeFile(`${process.pid}\n`, { encoding: 'utf8' });
-            return new TokenStoreLock(lockPath, handle);
-        } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code === 'EEXIST') {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const handle = await open(lockPath, 'wx', 0o600);
+                await handle.writeFile(`${process.pid}\n`, { encoding: 'utf8' });
+                return new TokenStoreLock(lockPath, handle);
+            } catch (err) {
+                const code = (err as NodeJS.ErrnoException).code;
+                if (code !== 'EEXIST') throw err;
+                if (attempt === 0 && await stealStaleLock(lockPath)) continue;
                 throw new TokenStoreLockError(storePath);
             }
-            throw err;
         }
+        throw new TokenStoreLockError(storePath);
     }
 
     async release(): Promise<void> {

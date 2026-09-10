@@ -109,13 +109,37 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
     const timeoutMs = io.timeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS;
 
     const abort = new AbortController();
-    const onAbort = () => {
+    let exiting = false;
+
+    const closeAll = async (): Promise<void> => {
+        abort.abort();
+        await Promise.allSettled([
+            verifyClient?.close() ?? Promise.resolve(),
+            verifyTransport?.close() ?? Promise.resolve(),
+            client?.close() ?? Promise.resolve(),
+            transport?.close() ?? Promise.resolve(),
+            listener?.close() ?? Promise.resolve(),
+            lock?.release() ?? Promise.resolve(),
+        ]);
+    };
+
+    const onIoAbort = () => {
         abort.abort();
         void listener?.close();
     };
-    io.signal?.addEventListener('abort', onAbort);
-    if (io.signal?.aborted) onAbort();
-    const onSig = onAbort;
+    io.signal?.addEventListener('abort', onIoAbort);
+    if (io.signal?.aborted) onIoAbort();
+
+    const onSig = () => {
+        if (exiting) return;
+        exiting = true;
+        abort.abort();
+        const hardExit = setTimeout(() => process.exit(1), 1000);
+        void closeAll().finally(() => {
+            clearTimeout(hardExit);
+            process.exit(1);
+        });
+    };
     process.on('SIGINT', onSig);
     process.on('SIGTERM', onSig);
 
@@ -192,15 +216,22 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
             let callback;
             if (io.stdin.isTTY) {
                 writeLine(io.stdout, 'If you cannot use the tunnel, paste the full callback URL here.');
-                const paste = readPastedUrl(io.stdin, io.stdout, abort.signal).then((line) => {
+                const pasteAbort = new AbortController();
+                const onParentAbort = () => pasteAbort.abort();
+                abort.signal.addEventListener('abort', onParentAbort, { once: true });
+                const paste = readPastedUrl(io.stdin, io.stdout, pasteAbort.signal).then((line) => {
                     listener!.acceptPastedCallbackUrl(line);
-                }).catch((err: unknown) => {
-                    if (err instanceof OAuthCallbackError) throw err;
                 });
-                callback = await Promise.race([
-                    callbackWait,
-                    paste.then(() => callbackWait),
-                ]);
+                try {
+                    callback = await Promise.race([
+                        callbackWait,
+                        paste.then(() => callbackWait),
+                    ]);
+                } finally {
+                    abort.signal.removeEventListener('abort', onParentAbort);
+                    pasteAbort.abort();
+                    await paste.catch(() => undefined);
+                }
             } else {
                 callback = await callbackWait;
             }
@@ -260,13 +291,10 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
     } finally {
         process.off('SIGINT', onSig);
         process.off('SIGTERM', onSig);
-        io.signal?.removeEventListener('abort', onAbort);
-        try { await verifyClient?.close(); } catch { /* ignore */ }
-        try { await verifyTransport?.close(); } catch { /* ignore */ }
-        try { await client?.close(); } catch { /* ignore */ }
-        try { await transport?.close(); } catch { /* ignore */ }
-        try { await listener?.close(); } catch { /* ignore */ }
-        try { await lock?.release(); } catch { /* ignore */ }
+        io.signal?.removeEventListener('abort', onIoAbort);
+        if (!exiting) {
+            await closeAll();
+        }
     }
 }
 

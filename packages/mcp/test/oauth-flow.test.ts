@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,6 +11,9 @@ import { runMcpAuth } from '../src/mcp-auth-cli.ts';
 import { FileTokenStore, TOKEN_STORE_VERSION, TokenStoreLock } from '../src/oauth-token-store.ts';
 import { startLoopbackCallback } from '../src/oauth-callback-server.ts';
 import { startOAuthMcpFixture } from './helpers/oauth-mcp-fixture.ts';
+
+const cliPath = fileURLToPath(new URL('../src/mcp-auth-cli.ts', import.meta.url));
+const tsxCli = fileURLToPath(new URL('../../../node_modules/tsx/dist/cli.mjs', import.meta.url));
 
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), '../src');
 
@@ -28,20 +32,31 @@ test('none, omitted auth, and bearer connect without OAuth provider', async () =
         clientSecret: 'secret',
         rejectBearer: () => false,
     });
+    const open = await startOAuthMcpFixture({
+        clientId: 'id',
+        clientSecret: 'secret',
+        requireAuth: false,
+    });
     const dir = await mkdtemp(join(tmpdir(), 'mcp-conn-'));
     const configPath = join(dir, 'config.yaml');
     await writeFile(configPath, 'x: 1\n');
     try {
-        const none = await connectCustomMcpServers([
+        const noneOnOauth = await connectCustomMcpServers([
             { name: 'LocalTools', url: fixture.mcpUrl, auth: { type: 'none' }, enabled: true },
         ], 'all', { configPath });
-        // unauthenticated MCP is rejected by fixture (401) and skipped
-        assert.equal(none, undefined);
+        assert.equal(noneOnOauth, undefined);
+
+        const none = await connectCustomMcpServers([
+            { name: 'LocalTools', url: open.mcpUrl, auth: { type: 'none' }, enabled: true },
+        ], 'all', { configPath });
+        assert.ok(none?.toolDefs.some((tool) => tool.name === 'whoami'));
+        await none?.disconnectAll();
 
         const omitted = await connectCustomMcpServers([
-            { name: 'Omitted', url: 'http://127.0.0.1:1/mcp', enabled: true },
-        ], undefined, { configPath });
-        assert.equal(omitted, undefined);
+            { name: 'Omitted', url: open.mcpUrl, enabled: true },
+        ], 'all', { configPath });
+        assert.ok(omitted?.toolDefs.some((tool) => tool.name === 'whoami'));
+        await omitted?.disconnectAll();
 
         const bearer = await connectCustomMcpServers([
             { name: 'Bearer', url: fixture.mcpUrl, auth: { type: 'bearer', token: 'access-token' } },
@@ -50,6 +65,7 @@ test('none, omitted auth, and bearer connect without OAuth provider', async () =
         await bearer?.disconnectAll();
     } finally {
         await fixture.close();
+        await open.close();
     }
 });
 
@@ -299,6 +315,9 @@ test('authorization_code callTool unauthorized returns promptly', async () => {
         version: 1,
         tokens: { access_token: 'access-token', token_type: 'Bearer', refresh_token: 'refresh-token' },
     }), { mode: 0o600 });
+    const logs: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => { logs.push(args.map(String).join(' ')); };
     try {
         const router = await connectCustomMcpServers([
             {
@@ -319,8 +338,12 @@ test('authorization_code callTool unauthorized returns promptly', async () => {
         const result = await router!.callTool('whoami', {});
         assert.ok(Date.now() - started < 5000);
         assert.match(result, /MCP unavailable/);
-        assert.match(result, /yarn mcp:auth/);
+        assert.match(result, /Try again later/);
+        assert.doesNotMatch(result, /yarn mcp:auth/);
+        assert.ok(logs.some((line) => line.includes('yarn mcp:auth --config')));
+        await router?.disconnectAll();
     } finally {
+        console.warn = origWarn;
         await fixture.close();
     }
 });
@@ -394,4 +417,202 @@ test('pasted callback URL is accepted; occupied callback is independent', async 
     );
     const result = await wait;
     assert.equal(result.code, 'pasted');
+});
+
+test('expired access token with valid refresh is silent at startup', async () => {
+    const fixture = await startOAuthMcpFixture({
+        clientId: 'cid',
+        clientSecret: 'csecret',
+        refreshToken: 'good-refresh',
+    });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-refresh-'));
+    const configPath = join(dir, 'config.yaml');
+    const storePath = join(dir, 't.json');
+    await writeFile(storePath, JSON.stringify({
+        version: 1,
+        tokens: {
+            access_token: 'expired-access',
+            token_type: 'Bearer',
+            refresh_token: 'good-refresh',
+        },
+    }), { mode: 0o600 });
+    const stdin = new PassThrough();
+    let stdinRead = false;
+    stdin.on('readable', () => { stdinRead = true; });
+    try {
+        const router = await connectCustomMcpServers([
+            {
+                name: 'GoogleCalendar',
+                url: fixture.mcpUrl,
+                auth: {
+                    type: 'oauth',
+                    grant: 'authorization_code',
+                    clientId: 'cid',
+                    clientSecret: 'csecret',
+                    tokenStore: storePath,
+                },
+            },
+        ], 'all', { configPath });
+        assert.equal(stdinRead, false);
+        assert.ok(router?.toolDefs.some((tool) => tool.name === 'whoami'));
+        assert.ok(fixture.tokenRequests.some((req) => req.grant === 'refresh_token'));
+        const stored = await new FileTokenStore(storePath).read();
+        assert.equal(stored?.tokens?.access_token, 'access-token-refreshed');
+        const result = await router!.callTool('whoami', {});
+        assert.match(result, /fixture-user/);
+        await router?.disconnectAll();
+    } finally {
+        await fixture.close();
+    }
+});
+
+test('SIGINT fail-closes the authorization CLI', async () => {
+    const fixture = await startOAuthMcpFixture({ clientId: 'cid', clientSecret: 'csecret' });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-sigint-'));
+    const configPath = join(dir, 'config.yaml');
+    await writeFile(configPath, `
+customMcpServers:
+  - name: SigintServer
+    url: ${fixture.mcpUrl}
+    auth:
+      type: oauth
+      grant: authorization_code
+      clientId: cid
+      clientSecret: csecret
+      redirectUri: http://127.0.0.1:18773/callback
+      tokenStore: tokens.json
+`);
+    const child = spawn(process.execPath, [tsxCli, cliPath, '--config', configPath, 'SigintServer'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    try {
+        const started = Date.now();
+        while (!stdout.includes('Waiting for the callback')) {
+            assert.ok(Date.now() - started < 8000, 'authorization command did not start');
+            await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+        child.kill('SIGINT');
+        const exit = await new Promise<number>((resolve, reject) => {
+            child.once('exit', (code) => resolve(code ?? 1));
+            setTimeout(() => reject(new Error('SIGINT did not exit CLI')), 3000);
+        });
+        assert.equal(exit, 1);
+
+        const replacementListener = startLoopbackCallback({
+            redirectUri: 'http://127.0.0.1:18773/callback',
+            expectedState: 'replacement-state',
+            timeoutMs: 1000,
+        });
+        await replacementListener.ready();
+        await replacementListener.close();
+
+        const replacementLock = await TokenStoreLock.acquire(join(dir, 'tokens.json'));
+        await replacementLock.release();
+    } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+            child.kill('SIGKILL');
+        }
+        await fixture.close();
+    }
+});
+
+test('concurrent client_credentials callTool failures reconnect at most once', async () => {
+    let remainingRejectedRequests = 0;
+    const fixture = await startOAuthMcpFixture({
+        clientId: 'cid',
+        clientSecret: 'csecret',
+        rejectBearer: () => {
+            if (remainingRejectedRequests === 0) return false;
+            remainingRejectedRequests -= 1;
+            return true;
+        },
+    });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-cc-concurrent-'));
+    const configPath = join(dir, 'config.yaml');
+    await writeFile(configPath, 'x: 1\n');
+    try {
+        const router = await connectCustomMcpServers([{
+            name: 'ServiceCrm',
+            url: fixture.mcpUrl,
+            auth: { type: 'oauth', clientId: 'cid', clientSecret: 'csecret' },
+        }], 'all', { configPath });
+        assert.ok(router?.has('whoami'));
+        const initializationsBeforeFailure = fixture.mcpMethods.filter((method) => method === 'initialize').length;
+        remainingRejectedRequests = 4;
+        const [first, second] = await Promise.all([
+            router!.callTool('whoami', {}),
+            router!.callTool('whoami', {}),
+        ]);
+        assert.match(first, /fixture-user|MCP unavailable/);
+        assert.match(second, /fixture-user|MCP unavailable/);
+        assert.ok(
+            fixture.mcpMethods.filter((method) => method === 'initialize').length - initializationsBeforeFailure <= 1,
+        );
+        await router!.disconnectAll();
+    } finally {
+        await fixture.close();
+    }
+});
+
+test('HTTP callback wins over TTY paste and cleans up readline', async () => {
+    const fixture = await startOAuthMcpFixture({
+        clientId: 'cid',
+        clientSecret: 'csecret',
+        issuerRequired: true,
+    });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-paste-race-'));
+    const configPath = join(dir, 'config.yaml');
+    await writeFile(configPath, `
+customMcpServers:
+  - name: PasteRace
+    url: ${fixture.mcpUrl}
+    auth:
+      type: oauth
+      grant: authorization_code
+      clientId: cid
+      clientSecret: csecret
+      redirectUri: http://127.0.0.1:18774/callback
+      tokenStore: tokens.json
+`);
+    const stdoutChunks: string[] = [];
+    const stdout = new PassThrough();
+    stdout.on('data', (chunk) => stdoutChunks.push(String(chunk)));
+    const stdin = new PassThrough() as PassThrough & { isTTY?: boolean };
+    stdin.isTTY = true;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+        const run = runMcpAuth(['--config', configPath, 'PasteRace'], {
+            stdin,
+            stdout,
+            stderr: new PassThrough(),
+            timeoutMs: 8000,
+        });
+        const started = Date.now();
+        while (!stdoutChunks.join('').includes('Waiting for the callback')) {
+            assert.ok(Date.now() - started < 5000, 'authorization command did not start');
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const authUrl = stdoutChunks.join('').match(/https?:\/\/127\.0\.0\.1:\d+\/authorize\S*/)?.[0];
+        assert.ok(authUrl);
+        const state = new URL(authUrl).searchParams.get('state');
+        assert.ok(state);
+        const code = fixture.issueAuthorizationCode();
+        const cb = await fetch(
+            `http://127.0.0.1:18774/callback?code=${code}&state=${state}&iss=${encodeURIComponent(fixture.issuer)}`,
+        );
+        assert.equal(cb.status, 200);
+        stdin.write('http://127.0.0.1:18774/callback?code=late&state=wrong\n');
+        const exit = await run;
+        assert.equal(exit, 0);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal(unhandled.length, 0);
+    } finally {
+        process.off('unhandledRejection', onUnhandled);
+        await fixture.close();
+    }
 });

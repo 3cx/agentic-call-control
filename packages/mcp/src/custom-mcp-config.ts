@@ -290,5 +290,4 @@ export function findAuthorizationCodeServer(
     return normalized;
 }
 
-/** Re-export for callers that still import the raw config union. */
 export type { CustomMcpAuth, CustomMcpServerConfig };
