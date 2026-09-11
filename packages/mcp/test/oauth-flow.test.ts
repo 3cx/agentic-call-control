@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { PassThrough } from 'node:stream';
+import { createServer } from 'node:http';
 import { connectCustomMcpServers } from '../src/custom-mcp-client.ts';
-import { runMcpAuth } from '../src/mcp-auth-cli.ts';
+import { configBaseDir, parseMcpAuthArgs, runMcpAuth } from '../src/mcp-auth-cli.ts';
 import { FileTokenStore, TOKEN_STORE_VERSION, TokenStoreLock } from '../src/oauth-token-store.ts';
 import { startLoopbackCallback } from '../src/oauth-callback-server.ts';
 import { startOAuthMcpFixture } from './helpers/oauth-mcp-fixture.ts';
@@ -155,7 +156,7 @@ test('client_credentials performs only one outer reconnect after SDK recovery is
         const tokensBeforeFailure = fixture.tokenRequests.length;
         remainingRejectedRequests = 2;
         const result = await router!.callTool('whoami', {});
-        assert.match(result, /fixture-user/);
+        assert.equal(result, 'fixture-user');
         assert.equal(
             fixture.mcpMethods.filter((method) => method === 'initialize').length - initializationsBeforeFailure,
             1,
@@ -546,8 +547,10 @@ test('concurrent client_credentials callTool failures reconnect at most once', a
             router!.callTool('whoami', {}),
             router!.callTool('whoami', {}),
         ]);
-        assert.match(first, /fixture-user|MCP unavailable/);
-        assert.match(second, /fixture-user|MCP unavailable/);
+        assert.match(first, /^(fixture-user|MCP unavailable — could not reach tool "whoami"\. Try again later\.)$/);
+        assert.match(second, /^(fixture-user|MCP unavailable — could not reach tool "whoami"\. Try again later\.)$/);
+        assert.doesNotMatch(first, /not connected|yarn mcp:auth|"type":"text"/);
+        assert.doesNotMatch(second, /not connected|yarn mcp:auth|"type":"text"/);
         assert.ok(
             fixture.mcpMethods.filter((method) => method === 'initialize').length - initializationsBeforeFailure <= 1,
         );
@@ -613,6 +616,104 @@ customMcpServers:
         assert.equal(unhandled.length, 0);
     } finally {
         process.off('unhandledRejection', onUnhandled);
+        await fixture.close();
+    }
+});
+
+test('relative --config resolves against INIT_CWD (yarn workspace cwd)', () => {
+    const initCwd = '/operator/repo-root';
+    const workspaceCwd = '/operator/repo-root/packages/mcp';
+    const resolved = parseMcpAuthArgs(
+        ['--config', 'examples/openai-realtime/config.yaml', 'GoogleWorkspace'],
+        { INIT_CWD: initCwd },
+        workspaceCwd,
+    );
+    assert.equal(resolved.configPath, join(initCwd, 'examples/openai-realtime/config.yaml'));
+    assert.equal(resolved.serverName, 'GoogleWorkspace');
+
+    const abs = '/abs/config.yaml';
+    assert.equal(parseMcpAuthArgs(['--config', abs, 'S'], { INIT_CWD: initCwd }, workspaceCwd).configPath, abs);
+    assert.equal(configBaseDir({ INIT_CWD: '/a' }, '/b'), '/a');
+    assert.equal(configBaseDir({}, '/b'), '/b');
+});
+
+test('documented yarn mcp:auth --config from repo root finds the example file', async () => {
+    const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+    const workspaceCwd = join(repoRoot, 'packages/mcp');
+    const relative = 'examples/openai-realtime/config.yaml.example';
+    const parsed = parseMcpAuthArgs(
+        ['--config', relative, 'DoesNotExist'],
+        { INIT_CWD: repoRoot },
+        workspaceCwd,
+    );
+    const raw = await readFile(parsed.configPath, 'utf8');
+    assert.match(raw, /customMcpServers/);
+
+    const stderr = new PassThrough();
+    const errChunks: string[] = [];
+    stderr.on('data', (chunk) => errChunks.push(String(chunk)));
+    const exit = await runMcpAuth(['--config', relative, 'DoesNotExist'], {
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr,
+        timeoutMs: 2000,
+        env: { ...process.env, INIT_CWD: repoRoot },
+        cwd: workspaceCwd,
+    });
+    const errText = errChunks.join('');
+    assert.equal(exit, 1, errText);
+    assert.doesNotMatch(errText, /ENOENT/);
+    assert.doesNotMatch(errText, /packages\/mcp\/examples/);
+    assert.match(errText, /server not found/);
+});
+
+test('already-authorized mcp:auth skips listener bind even if redirect port is occupied', async () => {
+    const fixture = await startOAuthMcpFixture({
+        clientId: 'cid',
+        clientSecret: 'csecret',
+    });
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-already-'));
+    const configPath = join(dir, 'config.yaml');
+    const storePath = join(dir, 't.json');
+    await writeFile(storePath, JSON.stringify({
+        version: 1,
+        tokens: { access_token: 'access-token', token_type: 'Bearer', refresh_token: 'refresh-token' },
+    }), { mode: 0o600 });
+    await writeFile(configPath, `
+customMcpServers:
+  - name: AlreadyOk
+    url: ${fixture.mcpUrl}
+    auth:
+      type: oauth
+      grant: authorization_code
+      clientId: cid
+      clientSecret: csecret
+      redirectUri: http://127.0.0.1:18775/callback
+      tokenStore: ${storePath}
+`);
+
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(18775, '127.0.0.1', () => resolve()));
+    const before = await readFile(storePath, 'utf8');
+    const stdout = new PassThrough();
+    const stdoutChunks: string[] = [];
+    stdout.on('data', (c) => stdoutChunks.push(String(c)));
+    try {
+        const exit = await runMcpAuth(['--config', configPath, 'AlreadyOk'], {
+            stdin: new PassThrough(),
+            stdout,
+            stderr: new PassThrough(),
+            timeoutMs: 5000,
+        });
+        assert.equal(exit, 0, stdoutChunks.join(''));
+        assert.match(stdoutChunks.join(''), /already authorized/);
+        assert.doesNotMatch(stdoutChunks.join(''), /needs authorization/);
+        assert.doesNotMatch(stdoutChunks.join(''), /ssh -L/);
+        const after = await readFile(storePath, 'utf8');
+        assert.equal(JSON.parse(after).expectedState, undefined);
+        assert.equal(JSON.parse(before).tokens.access_token, 'access-token');
+    } finally {
+        await new Promise<void>((resolve) => blocker.close(() => resolve()));
         await fixture.close();
     }
 });

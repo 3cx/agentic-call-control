@@ -52,7 +52,7 @@ export type {
 
 export { FileTokenStore, TokenStoreLock, TOKEN_STORE_VERSION } from './oauth-token-store.ts';
 export { FileBackedAuthCodeProvider } from './oauth-auth-code-provider.ts';
-export { runMcpAuth, parseMcpAuthArgs } from './mcp-auth-cli.ts';
+export { runMcpAuth, parseMcpAuthArgs, configBaseDir } from './mcp-auth-cli.ts';
 
 export { McpManager } from './mcp-manager.ts';
 export type { McpManagerConfig } from './mcp-manager.ts';

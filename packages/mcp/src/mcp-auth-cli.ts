@@ -23,9 +23,24 @@ export interface McpAuthIo {
     stderr: NodeJS.WritableStream;
     signal?: AbortSignal;
     timeoutMs?: number;
+    env?: NodeJS.ProcessEnv;
+    cwd?: string;
 }
 
-export function parseMcpAuthArgs(argv: string[]): { configPath: string; serverName: string } {
+/**
+ * Resolve relative --config paths against the operator's invocation directory.
+ * Prefer INIT_CWD (set by Yarn when the CLI is launched from the repo root);
+ * fall back to process.cwd() when the CLI is run directly.
+ */
+export function configBaseDir(env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): string {
+    return env.INIT_CWD || cwd;
+}
+
+export function parseMcpAuthArgs(
+    argv: string[],
+    env: NodeJS.ProcessEnv = process.env,
+    cwd: string = process.cwd(),
+): { configPath: string; serverName: string } {
     let configPath: string | undefined;
     const positional: string[] = [];
     for (let i = 0; i < argv.length; i++) {
@@ -51,7 +66,13 @@ export function parseMcpAuthArgs(argv: string[]): { configPath: string; serverNa
     if (positional.length !== 1) {
         throw new Error('Required: <server-name>');
     }
-    return { configPath: resolve(configPath), serverName: positional[0]! };
+    return { configPath: resolve(configBaseDir(env, cwd), configPath), serverName: positional[0]! };
+}
+
+function isUnauthorizedError(err: unknown): boolean {
+    if (err instanceof UnauthorizedError) return true;
+    return typeof err === 'object' && err !== null
+        && (err as { constructor?: { name?: string } }).constructor?.name === 'UnauthorizedError';
 }
 
 function writeLine(stream: NodeJS.WritableStream, text: string): void {
@@ -93,7 +114,7 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
 }): Promise<number> {
     let parsed: { configPath: string; serverName: string };
     try {
-        parsed = parseMcpAuthArgs(argv);
+        parsed = parseMcpAuthArgs(argv, io.env ?? process.env, io.cwd ?? process.cwd());
     } catch (err) {
         writeLine(io.stderr, chalk.red((err as Error).message));
         writeLine(io.stderr, 'Usage: yarn mcp:auth --config <path> <server-name>');
@@ -133,6 +154,8 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
     const onSig = () => {
         if (exiting) return;
         exiting = true;
+        process.off('SIGINT', onSig);
+        process.off('SIGTERM', onSig);
         abort.abort();
         const hardExit = setTimeout(() => process.exit(1), 1000);
         void closeAll().finally(() => {
@@ -162,6 +185,29 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
         });
         await provider.store.assertWritableTarget();
 
+        // Probe existing tokens first: do not bind the redirect port or write OAuth
+        // state until the SDK reports that interactive authorization is required.
+        client = new Client(
+            { name: 'agentic-call-control', version: '1.0.0' },
+            { capabilities: {} },
+        );
+        transport = new StreamableHTTPClientTransport(new URL(server.url), {
+            authProvider: provider,
+        });
+
+        try {
+            await client.connect(transport);
+            const tools = await client.listTools();
+            writeLine(io.stdout, chalk.green(
+                `[CustomMCP] "${server.name}" already authorized — ${tools.tools.length} tools`,
+            ));
+            return 0;
+        } catch (err) {
+            if (!isUnauthorizedError(err)) {
+                throw err;
+            }
+        }
+
         const expectedState = await provider.state();
         listener = startLoopbackCallback({
             redirectUri: server.auth.redirectUri,
@@ -173,107 +219,100 @@ export async function runMcpAuth(argv: string[], io: McpAuthIo = {
             throw new OAuthCallbackError('Authorization cancelled');
         }
 
-        client = new Client(
-            { name: 'agentic-call-control', version: '1.0.0' },
-            { capabilities: {} },
-        );
-        transport = new StreamableHTTPClientTransport(new URL(server.url), {
-            authProvider: provider,
-        });
+        const discovery = await provider.discoveryState();
+        const expectedIssuer = discoveredIssuer(discovery);
+        const requiresIssuer = issuerRequired(discovery);
+        listener.configureIssuer(expectedIssuer, requiresIssuer);
 
-        let alreadyAuthorized = false;
-        try {
-            await client.connect(transport);
-            alreadyAuthorized = true;
-        } catch (err) {
-            if (!(err instanceof UnauthorizedError) && err?.constructor?.name !== 'UnauthorizedError') {
-                throw err;
-            }
-        }
-
-        if (!alreadyAuthorized) {
-            const discovery = await provider.discoveryState();
-            const expectedIssuer = discoveredIssuer(discovery);
-            const requiresIssuer = issuerRequired(discovery);
-            listener.configureIssuer(expectedIssuer, requiresIssuer);
-
-            const authUrl = provider.takeAuthorizationUrl();
-            if (!authUrl) {
-                throw new Error('Authorization URL was not produced by the SDK');
-            }
-            const port = listener.redirectUrl.port || '80';
-            writeLine(io.stdout, `[CustomMCP] "${server.name}" needs authorization.`);
-            writeLine(io.stdout, '');
-            writeLine(io.stdout, '1. In another terminal, create an SSH tunnel:');
-            writeLine(io.stdout, `   ssh -L ${port}:127.0.0.1:${port} <user>@<pbx-host>`);
-            writeLine(io.stdout, '');
-            writeLine(io.stdout, '2. Keep that tunnel open and visit:');
-            writeLine(io.stdout, `   ${authUrl.toString()}`);
-            writeLine(io.stdout, '');
-            writeLine(io.stdout, `Waiting for the callback on ${listener.redirectUrl.toString()} (timeout: ${Math.round(timeoutMs / 60000)} minutes)...`);
-
-            const callbackWait = listener.wait();
-            let callback;
-            if (io.stdin.isTTY) {
-                writeLine(io.stdout, 'If you cannot use the tunnel, paste the full callback URL here.');
-                const pasteAbort = new AbortController();
-                const onParentAbort = () => pasteAbort.abort();
-                abort.signal.addEventListener('abort', onParentAbort, { once: true });
-                const paste = readPastedUrl(io.stdin, io.stdout, pasteAbort.signal).then((line) => {
-                    listener!.acceptPastedCallbackUrl(line);
-                });
-                try {
-                    callback = await Promise.race([
-                        callbackWait,
-                        paste.then(() => callbackWait),
-                    ]);
-                } finally {
-                    abort.signal.removeEventListener('abort', onParentAbort);
-                    pasteAbort.abort();
-                    await paste.catch(() => undefined);
-                }
-            } else {
-                callback = await callbackWait;
-            }
-
-            if (abort.signal.aborted) {
-                throw new OAuthCallbackError('Authorization cancelled');
-            }
-
-            if (requiresIssuer && !callback.iss) {
-                throw new OAuthCallbackError('Missing issuer');
-            }
-            if (callback.iss && expectedIssuer && callback.iss !== expectedIssuer) {
-                throw new OAuthCallbackError('Issuer mismatch');
-            }
-
-            await transport.finishAuth(callback.code);
+        let authUrl = provider.takeAuthorizationUrl();
+        if (!authUrl) {
+            // Probe did not reach redirect (e.g. missing tokens before discovery).
+            // Re-run connect now that the loopback listener is bound.
             await client.close().catch(() => undefined);
             await transport.close().catch(() => undefined);
-
-            verifyClient = new Client(
+            client = new Client(
                 { name: 'agentic-call-control', version: '1.0.0' },
                 { capabilities: {} },
             );
-            verifyTransport = new StreamableHTTPClientTransport(new URL(server.url), {
+            transport = new StreamableHTTPClientTransport(new URL(server.url), {
                 authProvider: provider,
             });
-            await verifyClient.connect(verifyTransport);
-            const tools = await verifyClient.listTools();
-            writeLine(io.stdout, chalk.green(
-                `[CustomMCP] "${server.name}" authorized — ${tools.tools.length} tools`,
-            ));
-            await verifyClient.close().catch(() => undefined);
-            await verifyTransport.close().catch(() => undefined);
-        } else {
-            const tools = await client.listTools();
-            writeLine(io.stdout, chalk.green(
-                `[CustomMCP] "${server.name}" already authorized — ${tools.tools.length} tools`,
-            ));
-            await client.close().catch(() => undefined);
-            await transport.close().catch(() => undefined);
-            await listener.close();
+            try {
+                await client.connect(transport);
+            } catch (err) {
+                if (!isUnauthorizedError(err)) {
+                    throw err;
+                }
+            }
+            authUrl = provider.takeAuthorizationUrl();
         }
+        if (!authUrl) {
+            throw new Error('Authorization URL was not produced by the SDK');
+        }
+
+        const port = listener.redirectUrl.port || '80';
+        writeLine(io.stdout, `[CustomMCP] "${server.name}" needs authorization.`);
+        writeLine(io.stdout, '');
+        writeLine(io.stdout, '1. In another terminal, create an SSH tunnel:');
+        writeLine(io.stdout, `   ssh -L ${port}:127.0.0.1:${port} <user>@<pbx-host>`);
+        writeLine(io.stdout, '');
+        writeLine(io.stdout, '2. Keep that tunnel open and visit:');
+        writeLine(io.stdout, `   ${authUrl.toString()}`);
+        writeLine(io.stdout, '');
+        writeLine(io.stdout, `Waiting for the callback on ${listener.redirectUrl.toString()} (timeout: ${Math.round(timeoutMs / 60000)} minutes)...`);
+
+        const callbackWait = listener.wait();
+        let callback;
+        if (io.stdin.isTTY) {
+            writeLine(io.stdout, 'If you cannot use the tunnel, paste the full callback URL here.');
+            const pasteAbort = new AbortController();
+            const onParentAbort = () => pasteAbort.abort();
+            abort.signal.addEventListener('abort', onParentAbort, { once: true });
+            const paste = readPastedUrl(io.stdin, io.stdout, pasteAbort.signal).then((line) => {
+                listener!.acceptPastedCallbackUrl(line);
+            });
+            const pasteThenWait = paste.then(() => callbackWait);
+            pasteThenWait.catch(() => undefined);
+            try {
+                callback = await Promise.race([callbackWait, pasteThenWait]);
+            } finally {
+                abort.signal.removeEventListener('abort', onParentAbort);
+                pasteAbort.abort();
+                await paste.catch(() => undefined);
+            }
+        } else {
+            callback = await callbackWait;
+        }
+
+        if (abort.signal.aborted) {
+            throw new OAuthCallbackError('Authorization cancelled');
+        }
+
+        if (requiresIssuer && !callback.iss) {
+            throw new OAuthCallbackError('Missing issuer');
+        }
+        if (callback.iss && expectedIssuer && callback.iss !== expectedIssuer) {
+            throw new OAuthCallbackError('Issuer mismatch');
+        }
+
+        await transport.finishAuth(callback.code);
+        await client.close().catch(() => undefined);
+        await transport.close().catch(() => undefined);
+
+        verifyClient = new Client(
+            { name: 'agentic-call-control', version: '1.0.0' },
+            { capabilities: {} },
+        );
+        verifyTransport = new StreamableHTTPClientTransport(new URL(server.url), {
+            authProvider: provider,
+        });
+        await verifyClient.connect(verifyTransport);
+        const tools = await verifyClient.listTools();
+        writeLine(io.stdout, chalk.green(
+            `[CustomMCP] "${server.name}" authorized — ${tools.tools.length} tools`,
+        ));
+        await verifyClient.close().catch(() => undefined);
+        await verifyTransport.close().catch(() => undefined);
 
         return 0;
     } catch (err) {

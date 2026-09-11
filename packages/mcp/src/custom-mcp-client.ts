@@ -218,37 +218,44 @@ export class CustomMcpConnection {
         }
     }
 
-    private async invokeTool(name: string, args: Record<string, unknown>): Promise<string> {
-        if (!this.client) return MCP_UNAVAILABLE(name);
-        const result = await this.client.callTool({ name, arguments: args });
-        if (result.isError) {
-            const errText = typeof result.content === 'string'
-                ? result.content
-                : JSON.stringify(result.content);
-            throw new Error(`Custom MCP tool "${name}" error: ${errText}`);
-        }
-        if (typeof result.content === 'string') return result.content;
-        if (Array.isArray(result.content)) {
-            return result.content
+    private flattenToolContent(content: unknown): string {
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+            return content
                 .map((c) => {
                     if (typeof c === 'string') return c;
-                    if (c.type === 'text') return (c as { text: string }).text;
+                    if (c && typeof c === 'object' && (c as { type?: unknown }).type === 'text') {
+                        return (c as { text: string }).text;
+                    }
                     return JSON.stringify(c);
                 })
                 .join('\n');
         }
-        return JSON.stringify(result.content);
+        return JSON.stringify(content);
     }
 
-    async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+    private async invokeTool(name: string, args: Record<string, unknown>): Promise<string> {
+        if (!this.client) return MCP_UNAVAILABLE(name);
+        const result = await this.client.callTool({ name, arguments: args });
+        if (result.isError) {
+            throw new Error(`Custom MCP tool "${name}" error: ${this.flattenToolContent(result.content)}`);
+        }
+        return this.flattenToolContent(result.content);
+    }
+
+    private async waitForClient(): Promise<boolean> {
         if (this.connectFlight) {
             try {
                 await this.connectFlight;
             } catch {
-                return MCP_UNAVAILABLE(name);
+                return false;
             }
         }
-        if (this.unavailableMessage || !this.client) {
+        return Boolean(this.client) && this.unavailableMessage === undefined;
+    }
+
+    async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+        if (!await this.waitForClient()) {
             return MCP_UNAVAILABLE(name);
         }
         try {
@@ -262,15 +269,15 @@ export class CustomMcpConnection {
             if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'client_credentials' && isOAuthCredentialFailure(err)) {
                 try {
                     await this.reconnectAfterUnauthorized();
+                    if (!await this.waitForClient()) return MCP_UNAVAILABLE(name);
                     return await this.invokeTool(name, args);
                 } catch {
                     return MCP_UNAVAILABLE(name);
                 }
             }
             if (this.connectFlight || isConnectionClosed(err)) {
+                if (!await this.waitForClient()) return MCP_UNAVAILABLE(name);
                 try {
-                    if (this.connectFlight) await this.connectFlight;
-                    if (this.unavailableMessage || !this.client) return MCP_UNAVAILABLE(name);
                     return await this.invokeTool(name, args);
                 } catch {
                     return MCP_UNAVAILABLE(name);
