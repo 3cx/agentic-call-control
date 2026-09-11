@@ -6,22 +6,27 @@
  * Enable via config.yaml `customMcpServers`. Empty / omitted = no-op (3CX MCP only).
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+    StreamableHTTPClientTransport,
+    StreamableHTTPError,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import { ClientCredentialsProvider } from '@modelcontextprotocol/sdk/client/auth-extensions.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
+import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import chalk from 'chalk';
 import type { McpToolDefinition } from './mcp-client.ts';
 import { coerceToolArguments } from './tool-schema.ts';
+import {
+    InteractiveAuthRequiredError,
+    mcpAuthRecoveryCommand,
+    type CustomMcpAuth,
+    type CustomMcpServerConfig,
+} from './custom-mcp-auth.ts';
+import { loadCustomMcpServers, type NormalizedCustomMcpServer } from './custom-mcp-config.ts';
+import { FileBackedAuthCodeProvider } from './oauth-auth-code-provider.ts';
 
-export type CustomMcpAuth =
-    | { type: 'none' }
-    | { type: 'bearer'; token: string };
-
-export interface CustomMcpServerConfig {
-    name: string;
-    url: string;
-    auth?: CustomMcpAuth;
-    /** Defaults to true when omitted. */
-    enabled?: boolean;
-}
+export type { CustomMcpAuth, CustomMcpServerConfig };
 
 export interface CustomMcpToolDef {
     name: string;
@@ -29,71 +34,261 @@ export interface CustomMcpToolDef {
     parameters: Record<string, unknown>;
 }
 
-function authHeaders(auth?: CustomMcpAuth): Record<string, string> {
-    if (auth?.type === 'bearer' && auth.token) {
+export interface ConnectCustomMcpOptions {
+    /** Absolute or process-resolved path of the example config.yaml. Required for authorization_code token stores. */
+    configPath: string;
+}
+
+const MCP_UNAVAILABLE = (name: string) => (
+    `MCP unavailable — could not reach tool "${name}". Try again later.`
+);
+
+function isOAuthCredentialFailure(err: unknown): boolean {
+    return err instanceof UnauthorizedError
+        || err instanceof InteractiveAuthRequiredError
+        || err instanceof OAuthError
+        || (err instanceof StreamableHTTPError && err.code === 401);
+}
+
+function isConnectionClosed(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const rec = err as { code?: unknown; message?: unknown };
+    if (rec.code === -32000) return true;
+    return typeof rec.message === 'string' && /connection closed/i.test(rec.message);
+}
+
+function authHeaders(auth: NormalizedCustomMcpServer['auth']): Record<string, string> {
+    if (auth.type === 'bearer' && auth.token) {
         return { Authorization: `Bearer ${auth.token}` };
     }
     return {};
 }
 
+function createAuthProvider(
+    server: NormalizedCustomMcpServer,
+    configPath: string,
+    interactive: boolean,
+): OAuthClientProvider | undefined {
+    if (server.auth.type !== 'oauth') return undefined;
+    if (server.auth.grant === 'client_credentials') {
+        return new ClientCredentialsProvider({
+            clientId: server.auth.clientId,
+            clientSecret: server.auth.clientSecret,
+            clientName: 'agentic-call-control',
+            scope: server.auth.scope,
+        });
+    }
+    return new FileBackedAuthCodeProvider({
+        serverName: server.name,
+        mcpUrl: server.url,
+        auth: server.auth,
+        configPath,
+        interactive,
+    });
+}
+
 export class CustomMcpConnection {
     private client: Client | null = null;
-    private readonly cfg: CustomMcpServerConfig;
+    private transport: StreamableHTTPClientTransport | null = null;
+    private authProvider: OAuthClientProvider | undefined;
+    private connected = false;
+    private unavailableMessage: string | undefined;
+    private connectFlight: Promise<void> | null = null;
     public readonly name: string;
     public tools: McpToolDefinition[] = [];
+    private readonly server: NormalizedCustomMcpServer;
+    private readonly configPath: string;
 
-    constructor(cfg: CustomMcpServerConfig) {
-        this.cfg = cfg;
-        this.name = cfg.name;
+    constructor(server: NormalizedCustomMcpServer, configPath: string) {
+        this.server = server;
+        this.configPath = configPath;
+        this.name = server.name;
+    }
+
+    recoveryCommand(): string {
+        return mcpAuthRecoveryCommand(this.configPath, this.name);
+    }
+
+    isUnavailable(): boolean {
+        return this.unavailableMessage !== undefined;
     }
 
     async connect(): Promise<void> {
-        const transport = new StreamableHTTPClientTransport(
-            new URL(this.cfg.url),
-            { requestInit: { headers: authHeaders(this.cfg.auth) } },
+        return this.connectSingleFlight(true);
+    }
+
+    private async reconnectAfterUnauthorized(): Promise<void> {
+        return this.connectSingleFlight(false);
+    }
+
+    private async connectSingleFlight(allowCredentialRecreate: boolean): Promise<void> {
+        if (this.connectFlight) return this.connectFlight;
+        this.connectFlight = this.connectInternal(allowCredentialRecreate).finally(() => {
+            this.connectFlight = null;
+        });
+        return this.connectFlight;
+    }
+
+    private async connectInternal(allowCredentialRecreate: boolean): Promise<void> {
+        await this.closeClient();
+        this.unavailableMessage = undefined;
+        this.authProvider = createAuthProvider(this.server, this.configPath, false);
+
+        if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'authorization_code') {
+            const cmd = this.recoveryCommand();
+            try {
+                const stored = await (this.authProvider as FileBackedAuthCodeProvider).store.read();
+                if (!stored?.tokens) {
+                    await this.markUnavailable(`Authorize with: ${cmd}`);
+                    throw new InteractiveAuthRequiredError(cmd);
+                }
+            } catch (err) {
+                if (err instanceof InteractiveAuthRequiredError) throw err;
+                await this.markUnavailable(`Authorize with: ${cmd}`);
+                throw new InteractiveAuthRequiredError(cmd);
+            }
+        }
+
+        const headers = authHeaders(this.server.auth);
+        this.transport = new StreamableHTTPClientTransport(
+            new URL(this.server.url),
+            {
+                ...(this.authProvider ? { authProvider: this.authProvider } : {}),
+                ...(Object.keys(headers).length > 0 ? { requestInit: { headers } } : {}),
+            },
         );
 
         this.client = new Client(
             { name: 'agentic-call-control', version: '1.0.0' },
             { capabilities: {} },
         );
-        await this.client.connect(transport);
 
-        const { tools } = await this.client.listTools();
-        this.tools = tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: t.inputSchema as Record<string, unknown> | undefined,
-        }));
+        try {
+            await this.client.connect(this.transport);
+            const { tools } = await this.client.listTools();
+            this.tools = tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+            }));
+        } catch (err) {
+            if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'authorization_code' && isOAuthCredentialFailure(err)) {
+                const cmd = this.recoveryCommand();
+                await this.markUnavailable(`Authorize with: ${cmd}`);
+                throw new InteractiveAuthRequiredError(cmd);
+            }
+            if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'client_credentials' && isOAuthCredentialFailure(err)) {
+                if (allowCredentialRecreate) {
+                    await this.closeClient();
+                    return this.connectInternal(false);
+                }
+            }
+            await this.closeClient();
+            throw err;
+        }
 
+        this.connected = true;
         console.log(chalk.green(`[CustomMCP] "${this.name}" connected — ${this.tools.length} tools`));
     }
 
-    async callTool(name: string, args: Record<string, unknown>): Promise<string> {
-        if (!this.client) throw new Error(`CustomMCP "${this.name}" not connected`);
-        const result = await this.client.callTool({ name, arguments: args });
-        if (result.isError) {
-            const errText = typeof result.content === 'string'
-                ? result.content
-                : JSON.stringify(result.content);
-            throw new Error(`Custom MCP tool "${name}" error: ${errText}`);
+    private async markUnavailable(detail: string): Promise<void> {
+        this.unavailableMessage = detail;
+        this.connected = false;
+        this.tools = [];
+        await this.closeClient();
+        console.warn(chalk.yellow(`[CustomMCP] "${this.name}" skipped. ${detail}`));
+    }
+
+    private async closeClient(): Promise<void> {
+        const transport = this.transport;
+        const client = this.client;
+        this.transport = null;
+        this.client = null;
+        this.authProvider = undefined;
+        this.connected = false;
+        try {
+            await client?.close();
+        } catch {
+            // ignore
         }
-        if (typeof result.content === 'string') return result.content;
-        if (Array.isArray(result.content)) {
-            return result.content
+        try {
+            await transport?.close();
+        } catch {
+            // ignore
+        }
+    }
+
+    private flattenToolContent(content: unknown): string {
+        if (typeof content === 'string') return content;
+        if (Array.isArray(content)) {
+            return content
                 .map((c) => {
                     if (typeof c === 'string') return c;
-                    if (c.type === 'text') return (c as { text: string }).text;
+                    if (c && typeof c === 'object' && (c as { type?: unknown }).type === 'text') {
+                        return (c as { text: string }).text;
+                    }
                     return JSON.stringify(c);
                 })
                 .join('\n');
         }
-        return JSON.stringify(result.content);
+        return JSON.stringify(content);
     }
 
-    disconnect(): void {
-        void this.client?.close?.().catch(() => undefined);
-        this.client = null;
+    private async invokeTool(name: string, args: Record<string, unknown>): Promise<string> {
+        if (!this.client) return MCP_UNAVAILABLE(name);
+        const result = await this.client.callTool({ name, arguments: args });
+        if (result.isError) {
+            throw new Error(`Custom MCP tool "${name}" error: ${this.flattenToolContent(result.content)}`);
+        }
+        return this.flattenToolContent(result.content);
+    }
+
+    private async waitForClient(): Promise<boolean> {
+        if (this.connectFlight) {
+            try {
+                await this.connectFlight;
+            } catch {
+                return false;
+            }
+        }
+        return Boolean(this.client) && this.unavailableMessage === undefined;
+    }
+
+    async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+        if (!await this.waitForClient()) {
+            return MCP_UNAVAILABLE(name);
+        }
+        try {
+            return await this.invokeTool(name, args);
+        } catch (err) {
+            if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'authorization_code' && isOAuthCredentialFailure(err)) {
+                const cmd = this.recoveryCommand();
+                await this.markUnavailable(`Authorize with: ${cmd}`);
+                return MCP_UNAVAILABLE(name);
+            }
+            if (this.server.auth.type === 'oauth' && this.server.auth.grant === 'client_credentials' && isOAuthCredentialFailure(err)) {
+                try {
+                    await this.reconnectAfterUnauthorized();
+                    if (!await this.waitForClient()) return MCP_UNAVAILABLE(name);
+                    return await this.invokeTool(name, args);
+                } catch {
+                    return MCP_UNAVAILABLE(name);
+                }
+            }
+            if (this.connectFlight || isConnectionClosed(err)) {
+                if (!await this.waitForClient()) return MCP_UNAVAILABLE(name);
+                try {
+                    return await this.invokeTool(name, args);
+                } catch {
+                    return MCP_UNAVAILABLE(name);
+                }
+            }
+            throw err;
+        }
+    }
+
+    async disconnect(): Promise<void> {
+        await this.closeClient();
     }
 }
 
@@ -167,8 +362,8 @@ export class CustomMcpRouter {
         return conn.callTool(toolName, coerced);
     }
 
-    disconnectAll(): void {
-        for (const conn of this.connections) conn.disconnect();
+    async disconnectAll(): Promise<void> {
+        await Promise.all(this.connections.map((conn) => conn.disconnect()));
     }
 }
 
@@ -176,19 +371,31 @@ export class CustomMcpRouter {
 export async function connectCustomMcpServers(
     configs: CustomMcpServerConfig[] | undefined,
     allowlist?: string[] | 'all',
+    options?: ConnectCustomMcpOptions,
 ): Promise<CustomMcpRouter | undefined> {
-    const enabled = (configs ?? []).filter((c) => c.enabled !== false && c.name && c.url);
-    if (enabled.length === 0) return undefined;
+    const configPath = options?.configPath ?? '';
+    const loaded = loadCustomMcpServers(configs, configPath);
+    for (const err of loaded.skipped) {
+        console.warn(chalk.yellow(err.message));
+    }
+    if (loaded.servers.length === 0) return undefined;
 
     const connected: CustomMcpConnection[] = [];
-    for (const cfg of enabled) {
-        const conn = new CustomMcpConnection(cfg);
+    for (const server of loaded.servers) {
+        const conn = new CustomMcpConnection(server, configPath);
         try {
             await conn.connect();
             connected.push(conn);
         } catch (err) {
+            if (err instanceof InteractiveAuthRequiredError) {
+                console.warn(
+                    chalk.yellow(`[CustomMCP] "${server.name}" failed, skipping:`),
+                    err.message,
+                );
+                continue;
+            }
             console.warn(
-                chalk.yellow(`[CustomMCP] "${cfg.name}" failed, skipping:`),
+                chalk.yellow(`[CustomMCP] "${server.name}" failed, skipping:`),
                 (err as Error).message,
             );
         }

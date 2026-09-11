@@ -101,7 +101,9 @@ No separate STT, LLM, or TTS pipeline — the realtime model handles conversatio
 
 ### MCP Tools
 
-MCP is connected at startup via `@3cx-examples/mcp`. 3CX tools are discovered and passed to the realtime session. Optional extra servers: `customMcpServers` in `config.yaml.example`. Enable tools in `agents/<profile>.yaml` by listing exact names under `mcpTools` (e.g. `list_phonebook`, `googlecalendar.quick_add`).
+MCP is connected at startup via `@3cx-examples/mcp`. 3CX tools are discovered and passed to the realtime session. Optional extra servers: `customMcpServers` in `config.yaml.example` (`none`, `bearer`, or `oauth`). Enable tools in `agents/<profile>.yaml` by listing exact names under `mcpTools` (e.g. `list_phonebook`, `googlecalendar.quick_add`).
+
+OAuth `authorization_code` servers are provisioned with `yarn mcp:auth --config examples/alibaba-qwen-realtime/config.yaml <server-name>` before `yarn start:alibaba-qwen`. Startup never prompts; a missing or expired refresh token skips that server and logs the recovery command. Do not commit `.mcp-tokens/`.
 
 ```typescript
 // index.ts — 3CX MCP + optional custom MCP, filtered by profile.mcpTools

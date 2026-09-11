@@ -85,7 +85,9 @@ Fetched from 3CX MCP at startup, converted to xAI function tool format, proxied 
 |---|---|
 | `list_phonebook` | Search PBX phonebook by name, extension, or email. Returns `isAvailable`. |
 
-Enable tools per agent in `agents/<profile>.yaml` via `mcpTools` (exact names). Optional extra MCP servers: `customMcpServers` in `config.yaml.example` — after connecting, add each tool name to the same `mcpTools` list.
+Enable tools per agent in `agents/<profile>.yaml` via `mcpTools` (exact names). Optional extra MCP servers: `customMcpServers` in `config.yaml.example` (`none`, `bearer`, or `oauth`) — after connecting, add each tool name to the same `mcpTools` list.
+
+OAuth `authorization_code` servers: `yarn mcp:auth --config examples/xai-realtime/config.yaml <server-name>` before `yarn start:xai`. Startup never prompts. Do not commit `.mcp-tokens/`.
 
 ### Tool Results
 

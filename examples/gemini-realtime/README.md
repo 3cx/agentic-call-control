@@ -111,7 +111,7 @@ Fetched from 3CX MCP at startup, converted to Gemini function declaration format
 
 ### Extra MCP servers
 
-Optional servers beyond `{pbxBase}/mcp` — see `customMcpServers` in `config.yaml.example`. After connecting a server, add each tool you want the agent to use to `mcpTools` in `agents/<profile>.yaml` (exact name from the startup log):
+Optional servers beyond `{pbxBase}/mcp` — see `customMcpServers` in `config.yaml.example` (`none`, `bearer`, or `oauth`). After connecting a server, add each tool you want the agent to use to `mcpTools` in `agents/<profile>.yaml` (exact name from the startup log):
 
 ```yaml
 mcpTools:
@@ -120,6 +120,8 @@ mcpTools:
 ```
 
 Only listed tools are exposed; everything else stays disabled (`✗` in the startup log).
+
+OAuth `authorization_code` servers: `yarn mcp:auth --config examples/gemini-realtime/config.yaml <server-name>` before `yarn start:gemini`. Startup never prompts. Do not commit `.mcp-tokens/`.
 
 <br>
 
