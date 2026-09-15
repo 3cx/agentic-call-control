@@ -29,13 +29,14 @@
 
 ## 快速开始
 
-在仓库根目录复制配置文件：
+在**仓库根目录**执行：
 
 ```bash
+yarn install
 cp examples/alibaba-qwen-realtime/config.yaml.example examples/alibaba-qwen-realtime/config.yaml
 ```
 
-填写凭证——打开 `examples/alibaba-qwen-realtime/config.yaml`：
+编辑 `examples/alibaba-qwen-realtime/config.yaml`：
 
 ```yaml
 # 3CX 服务主体 — Web 客户端 → 管理 → 集成 → API
@@ -56,7 +57,7 @@ companyName: Your Company
 agentName: Assistant
 ```
 
-然后在仓库根目录启动：
+启动示例：
 
 ```bash
 yarn start:alibaba-qwen
@@ -64,10 +65,10 @@ yarn start:alibaba-qwen
 
 ### 呼叫代理
 
-代理运行后，有两种方式在 3CX PBX 上接通它：
+- **内部呼叫** ——从任何 3CX 分机拨打服务主体的**客户端 ID**（`appId`）。
+- **外部呼叫（DID）** ——如果为服务主体分配了 DID，呼叫者可拨打该号码。
 
-- **内部呼叫** ——从任何已注册的 3CX 分机（桌面电话、Web 客户端或移动应用），拨打**客户端 ID**（配置的 `appId`，例如 `assistant`）。PBX 将直接把呼叫路由到代理。
-- **外部呼叫（DID）** ——如果你为服务主体分配了 DID 号码（上面的第 6 步），外部线路上的呼叫者可以拨打该电话号码接通代理。
+代理行为通过 `agentProfile` 配置 —— 详见根目录 [README 中的 Agent profiles](../../README.md#agent-profiles)。
 
 ---
 

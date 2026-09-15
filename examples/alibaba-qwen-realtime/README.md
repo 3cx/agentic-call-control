@@ -29,13 +29,14 @@ Get an API key from the [Alibaba Cloud DashScope Console](https://dashscope.cons
 
 ## Quick Start
 
-From the repo root, copy the config:
+From the **repo root**:
 
 ```bash
+yarn install
 cp examples/alibaba-qwen-realtime/config.yaml.example examples/alibaba-qwen-realtime/config.yaml
 ```
 
-Fill in your credentials — open `examples/alibaba-qwen-realtime/config.yaml`:
+Edit `examples/alibaba-qwen-realtime/config.yaml`:
 
 ```yaml
 # 3CX Service Principal — Web Client → Admin → Integrations → API
@@ -56,7 +57,7 @@ companyName: Your Company
 agentName: Assistant
 ```
 
-Then start from the repo root:
+Start the example:
 
 ```bash
 yarn start:alibaba-qwen
@@ -64,10 +65,10 @@ yarn start:alibaba-qwen
 
 ### Calling the Agent
 
-Once the agent is running, there are two ways to reach it on your 3CX PBX:
+- **Internal call** — dial the Service Principal **Client ID** (`appId`) from any 3CX extension.
+- **External call (DID)** — if you assigned a DID to the Service Principal, callers can dial that number.
 
-- **Internal call** — from any registered 3CX extension (desk phone, web client, or mobile app), dial the **Client ID** (the `appId` you configured, e.g. `assistant`). The PBX routes the call directly to the agent.
-- **External call (DID)** — if you assigned a DID number to the Service Principal (step 6 above), callers can dial that phone number from any external line to reach the agent.
+Agent behavior is configured via `agentProfile` — see [Agent profiles](../../README.md#agent-profiles) in the root README.
 
 ---
 
