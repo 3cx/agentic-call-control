@@ -30,7 +30,12 @@ import { load } from 'js-yaml';
 function loadConfig(): AppConfig {
     const configPath = resolve(process.cwd(), 'config.yaml');
     const raw = readFileSync(configPath, 'utf-8');
-    return load(raw) as AppConfig;
+    const cfg = load(raw) as AppConfig;
+    // YAML may parse numeric Client IDs as numbers; SDK compares DN with strict ===.
+    if (cfg.appId != null && typeof cfg.appId !== 'string') {
+        cfg.appId = String(cfg.appId);
+    }
+    return cfg;
 }
 
 export default loadConfig();

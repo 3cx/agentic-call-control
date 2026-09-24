@@ -34,6 +34,10 @@ function loadConfig(): AppConfig {
     const configPath = resolve(process.cwd(), 'config.yaml');
     const raw = readFileSync(configPath, 'utf-8');
     const cfg = load(raw) as AppConfig;
+    // YAML may parse numeric Client IDs as numbers; SDK compares DN with strict ===.
+    if (cfg.appId != null && typeof cfg.appId !== 'string') {
+        cfg.appId = String(cfg.appId);
+    }
     cfg.dashscopeBaseUrl ??= DASHSCOPE_DEFAULT_BASE;
     return cfg;
 }
