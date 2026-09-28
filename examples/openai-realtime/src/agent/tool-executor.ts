@@ -245,6 +245,9 @@ export function createToolExecutor(deps: ToolExecutorDeps) {
 }
 
 function safeParse(json: string): Record<string, unknown> {
-    try { return JSON.parse(json || '{}'); }
-    catch { return {}; }
+    const parsed: unknown = JSON.parse(json);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Tool arguments must be a JSON object');
+    }
+    return parsed as Record<string, unknown>;
 }
